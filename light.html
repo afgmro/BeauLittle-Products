@@ -22,7 +22,7 @@
       box-shadow: 0 2px 12px rgba(0,0,0,0.06);
     }
     .title { font-size: 20px; font-weight: 600; margin-bottom:8px; text-align:center; }
-    .sub-desc { text-align:center; color:#666; font-size:14px; margin-bottom:24px; }
+    .sub-desc { text-align:center; color:#666; font-size:14px; margin-bottom:16px; }
     .warn-box {
       background:#fff3cd;
       border-radius:10px;
@@ -31,12 +31,33 @@
       color:#856404;
       margin-bottom:20px;
     }
-    .question-item { margin-bottom:20px; }
-    .q-text { font-size:15px; margin-bottom:10px; }
-    .opt-group { display:flex; flex-wrap:wrap; gap:8px; }
+    /* 进度条 */
+    .progress-wrap {
+      width:100%;
+      height:8px;
+      background:#e9ecef;
+      border-radius:99px;
+      margin-bottom:24px;
+      overflow:hidden;
+    }
+    .progress-bar {
+      height:100%;
+      background:#4080ff;
+      width:0%;
+      transition: 0.3s width;
+    }
+    .progress-text {
+      text-align:center;
+      font-size:13px;
+      color:#666;
+      margin-bottom:16px;
+    }
+    .question-item { margin-bottom:24px; }
+    .q-text { font-size:16px; margin-bottom:20px; text-align:center; }
+    .opt-group { display:flex; flex-wrap:wrap; gap:10px; }
     .opt-btn {
-      flex:1; min-width:100px;
-      padding:10px 6px;
+      flex:1 0 42%;
+      padding:14px 8px;
       border:1px solid #ddd;
       border-radius:8px;
       background:#fff;
@@ -50,21 +71,27 @@
       color:#fff;
       border-color:#4080ff;
     }
-    .btn-submit {
-      width:100%;
-      padding:13px;
-      background:#2b78e4;
-      color:#fff;
-      border:none;
+    .btn-area { display:flex; gap:12px; margin-top:20px; }
+    .btn-prev,.btn-next {
+      flex:1;
+      padding:12px;
       border-radius:10px;
-      font-size:16px;
-      margin-top:10px;
+      font-size:15px;
       cursor:pointer;
     }
-    .btn-submit:disabled { background:#94b8ec; cursor:not-allowed; }
+    .btn-prev {
+      border:1px solid #bbb;
+      background:#fff;
+    }
+    .btn-next {
+      border:none;
+      background:#2b78e4;
+      color:#fff;
+    }
+    .btn-next:disabled { background:#94b8ec; cursor:not-allowed; }
     .result-area { margin-top:22px; display:none; }
-    .score-text { font-size:17px; font-weight:600; margin-bottom:10px; }
-    .result-desc { font-size:14px; background:#f7f8fa; padding:14px; border-radius:10px; }
+    .score-text { font-size:17px; font-weight:600; margin-bottom:10px; text-align:center; }
+    .result-desc { font-size:14px; background:#f7f8fa; padding:14px; border-radius:10px; white-space:pre-line; }
     .btn-reset {
       width:100%;
       margin-top:16px;
@@ -84,9 +111,17 @@
     ⚠️重要免责：本测试仅作情绪参考，<b>不能替代精神科/心理医生诊断</b>，不能作为疾病判断、就医依据。如果痛苦感强烈，请尽快寻求线下专业帮助。
   </div>
 
+  <div class="progress-wrap">
+    <div class="progress-bar" id="progressBar"></div>
+  </div>
+  <div class="progress-text" id="progressText"></div>
+
   <div id="quizWrap"></div>
 
-  <button class="btn-submit" id="submitBtn" disabled>查看结果</button>
+  <div class="btn-area">
+    <button class="btn-prev" id="prevBtn" style="display:none;">上一题</button>
+    <button class="btn-next" id="nextBtn">下一题</button>
+  </div>
 
   <div class="result-area" id="resultWrap">
     <div class="score-text" id="scoreText"></div>
@@ -96,6 +131,7 @@
 </div>
 
 <script>
+// PHQ‑9 9题 + 轻量版额外4道简易题目（不计入PHQ‑9分数）
 const phq9 = [
   "做事时提不起劲或没有兴趣",
   "感到心情低落、沮丧或绝望",
@@ -107,49 +143,72 @@ const phq9 = [
   "动作或说话速度缓慢到别人已经察觉；或正好相反，烦躁或坐立不安、动来动去",
   "有不如死掉，或用某种方式伤害自己的念头"
 ];
+// 轻量版新增补充题（不计入PHQ‑9计分）
+const lightExtra = [
+  "容易因为小事感到烦躁生气",
+  "对以前喜欢的事情兴趣下降",
+  "容易觉得压力大、心里紧绷",
+  "经常觉得孤单或者闷闷不乐"
+];
+const totalQuestions = [...phq9, ...lightExtra];
 const optLabels = ["完全没有", "几天", "一半以上天数", "几乎每天"];
 
 const quizWrap = document.getElementById('quizWrap');
-const submitBtn = document.getElementById('submitBtn');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
 const resultWrap = document.getElementById('resultWrap');
 const scoreText = document.getElementById('scoreText');
 const resultText = document.getElementById('resultText');
 const resetBtn = document.getElementById('resetBtn');
 
-let answers = Array(phq9.length).fill(null);
+let currentIndex = 0;
+let answers = Array(totalQuestions.length).fill(null);
 
-function renderQuestions(){
+// 更新进度条
+function updateProgress(){
+  const percent = ((currentIndex+1)/totalQuestions.length)*100;
+  progressBar.style.width = percent + "%";
+  progressText.innerText = `第 ${currentIndex+1} / ${totalQuestions.length} 题`;
+}
+
+//渲染当前单题
+function renderCurrentQuestion(){
   quizWrap.innerHTML = '';
-  phq9.forEach((qStr, idx)=>{
-    const div = document.createElement('div');
-    div.className = 'question-item';
-    div.innerHTML = `
-      <div class="q-text">${idx+1}. ${qStr}</div>
-      <div class="opt-group" data-idx="${idx}">
-        ${optLabels.map((lab, val)=>`<button class="opt-btn" data-val="${val}">${lab}</button>`).join('')}
-      </div>
-    `;
-    quizWrap.appendChild(div);
-  })
+  const qStr = totalQuestions[currentIndex];
+  const div = document.createElement('div');
+  div.className = 'question-item';
+  div.innerHTML = `
+    <div class="q-text">${qStr}</div>
+    <div class="opt-group">
+      ${optLabels.map((lab, val)=>`
+        <button class="opt-btn ${answers[currentIndex]===val?'active':''}" data-val="${val}">${lab}</button>
+      `).join('')}
+    </div>
+  `;
+  quizWrap.appendChild(div);
+
+  //选项点击
   document.querySelectorAll('.opt-btn').forEach(btn=>{
     btn.onclick = function(){
-      const parent = this.closest('.opt-group');
-      const i = Number(parent.dataset.idx);
       const v = Number(this.dataset.val);
-      answers[i] = v;
-      parent.querySelectorAll('.opt-btn').forEach(b=>b.classList.remove('active'));
+      answers[currentIndex] = v;
+      document.querySelectorAll('.opt-btn').forEach(b=>b.classList.remove('active'));
       this.classList.add('active');
-      checkReady();
+      nextBtn.disabled = false;
     }
   })
+
+  prevBtn.style.display = currentIndex>0 ? 'block':'none';
+  nextBtn.innerText = (currentIndex === totalQuestions.length-1) ? "查看结果":"下一题";
+  nextBtn.disabled = answers[currentIndex]===null;
+  updateProgress();
 }
 
-function checkReady(){
-  submitBtn.disabled = answers.some(x=> x===null);
-}
-
+//计算分数：只取前9道PHQ‑9
 function calcScore(){
-  return answers.reduce((s,v)=> s+v,0);
+  return answers.slice(0,9).reduce((s,v)=> s+v,0);
 }
 
 function getPhqInterpret(score){
@@ -160,22 +219,49 @@ function getPhqInterpret(score){
   return "分数：20‑27分｜重度情绪困扰，请务必尽快寻求线下专业医疗帮助，不要独自硬扛。";
 }
 
-submitBtn.onclick = function(){
-  const s = calcScore();
-  scoreText.innerText = "你的PHQ‑9得分："+s;
-  let res = getPhqInterpret(s);
-  res += "\n\n【轻量版提示】简易版本仅供趣味自测，结果参考意义有限。";
-  resultText.innerText = res;
-  resultWrap.style.display = 'block';
+//下一题/提交
+nextBtn.onclick = function(){
+  if(currentIndex < totalQuestions.length -1){
+    currentIndex++;
+    renderCurrentQuestion();
+  }else{
+    //最后一题，输出结果
+    const s = calcScore();
+    scoreText.innerText = "你的PHQ‑9得分："+s;
+    let res = getPhqInterpret(s);
+    res += "\n\n【轻量版提示】简易版本仅供趣味自测，附加题目不计入计分，结果参考意义有限。";
+    resultText.innerText = res;
+    //隐藏答题区域
+    quizWrap.style.display = 'none';
+    prevBtn.style.display = 'none';
+    nextBtn.style.display = 'none';
+    progressBar.style.display = 'none';
+    progressText.style.display = 'none';
+    resultWrap.style.display = 'block';
+  }
+}
+
+prevBtn.onclick = function(){
+  if(currentIndex>0){
+    currentIndex--;
+    renderCurrentQuestion();
+  }
 }
 
 resetBtn.onclick = function(){
-  answers = Array(phq9.length).fill(null);
+  currentIndex = 0;
+  answers = Array(totalQuestions.length).fill(null);
+  quizWrap.style.display = 'block';
+  prevBtn.style.display = 'none';
+  nextBtn.style.display = 'block';
+  progressBar.style.display = 'block';
+  progressText.style.display = 'block';
   resultWrap.style.display = 'none';
-  renderQuestions();
-  checkReady();
+  renderCurrentQuestion();
 }
-renderQuestions();
+
+//初始化
+renderCurrentQuestion();
 </script>
 </body>
 </html>
