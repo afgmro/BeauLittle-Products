@@ -1,0 +1,1748 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>拯救国王 · 第一关</title>
+<style>
+  * { box-sizing: border-box; }
+  html,body {
+    margin:0; padding:0; color:#f2f4ff;
+    font-family:"PingFang SC","Microsoft YaHei","Hiragino Sans GB",sans-serif;
+    -webkit-text-size-adjust:100%;
+    background:#0e1530;
+    background-image:radial-gradient(120% 70% at 50% 0%, #2a3a72 0%, #131c3e 55%, #0b1130 100%);
+    min-height:100vh;
+  }
+  #wrap { max-width:480px; margin:0 auto; padding:12px 10px 20px;
+    min-height:100vh; display:flex; flex-direction:column; justify-content:center; }
+  h1 { font-size:13px; margin:0 0 8px; letter-spacing:2px; font-weight:600; text-align:center; color:#7d8dbd; }
+  h1 span { color:#ffd75e; }
+  #stage { position:relative; border-radius:18px; overflow:hidden;
+    box-shadow:0 14px 44px rgba(0,0,0,.55), 0 0 0 3px rgba(255,255,255,.06); }
+  canvas { display:block; width:100%; height:auto; background:#8ec5f0; cursor:pointer; touch-action:none; }
+  #tip { margin-top:10px; font-size:11.5px; line-height:1.8; color:#93a2cb;
+    background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.07);
+    border-radius:12px; padding:10px 12px; }
+  #tip b { color:#e8ecff; font-weight:600; }
+  .k { display:inline-block; background:#2b3557; border:1px solid #45527f; border-radius:4px; padding:0 5px; color:#ffd75e; }
+  #overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(12,18,40,.86); z-index:5; padding:16px; }
+  #overlay.on { display:flex; }
+  .card { background:#232e50; border:1px solid #45527f; border-radius:16px; padding:22px 20px;
+    text-align:center; width:100%; max-width:300px; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  .card h2 { margin:0 0 6px; font-size:22px; letter-spacing:2px; }
+  .card h2.win { color:#ffd75e; }
+  .card h2.lose { color:#ff7a6a; }
+  .card h2.pause { color:#e8ecff; }
+  .card p { margin:6px 0 14px; font-size:13px; color:#b3bfdf; }
+  .card .stat { font-size:12px; color:#8d9ac2; margin:10px 0 16px; line-height:1.8; }
+  .card .stat b { color:#e8ecff; }
+  .btns { display:flex; flex-direction:column; gap:8px; }
+  button { background:#33406b; color:#e8ecff; border:1px solid #4d5c90; border-radius:10px;
+    padding:11px 14px; font-size:14px; cursor:pointer; font-family:inherit; width:100%; }
+  button:hover { background:#3d4c7e; }
+  button.primary { background:#ffd75e; color:#2b2410; border-color:#ffd75e; font-weight:600; }
+  button.primary:hover { background:#ffe487; }
+  button.ghost { background:transparent; color:#9aa7ce; }
+  button.ghost:hover { background:#33406b; color:#e8ecff; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>拯救国王 · <span>第 1 关</span> · 竖屏原型</h1>
+  <div id="stage">
+    <canvas id="cv" width="540" height="960"></canvas>
+    <div id="overlay"><div class="card" id="card"></div></div>
+  </div>
+  <div id="tip">
+    <b>玩法：</b>点一格选中，再点<b>相邻</b>方块交换（也可拖动）。横或竖凑成 <b>3 个以上同类</b>即可消除，<b>实际消除的是与它们相连的全部同类方块</b>。<br>
+    <b>方块不落：</b>消掉的方块<b>从不补充</b>，上方的方块也<b>不会掉下来</b>，原地留下空洞。<br>
+    <b>碎石像水流：</b>右侧堆满了<span class="k">灰色岩块</span>，它们像水一样流动——下方一有空隙就塌下去、向两侧铺开、顺着斜坡淌下去，通到底就沉入排石口消失。<br>
+    <b>目标：</b>在倒计时结束前，打通<span class="k">高亮支撑柱</span>里的通道，让所有岩块漏光。<br>
+    <b>道具：</b>底部 <span class="k">消除</span> 自动炸开一组方块，<span class="k">加时</span> +20 秒。<br>
+    <b>菜单：</b>右上角 <span class="k">‖</span> 可暂停 / 重新开始 / 退出。
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ==================== 可调参数（手机竖屏 540×960） ==================== */
+const CFG = {
+  W: 540, H: 960,
+  cell: 70, cols: 7,        // 格子放大：岩块变大后仍能顺畅流过通道
+  gridX: 25,                // 棋盘左边界 → 7 列 × 70 = 490
+  rockRows: 3,              // 积石区行数（棋盘上段）
+  groundRows: 4,            // 地基（消消乐）行数（第一关：薄一点，好打通）
+  rockCol0: 4,              // 积石/支撑柱起始列 → 列 4..6
+  gridY: 478,               // 地基第一行的顶部 y（= 地面）
+
+  hudH: 100, itemTop: 852,
+
+  // ---- 左侧场景 ----
+  beamY: 196, beamH: 26,    // 国王头顶的木板（顶）
+  spikeWallX: 16, spikeWallW: 48, spikeTipX: 122,
+  spikeTop: 232,
+  kingX: 200, kingScale: 2.5,
+  shieldX0: 249, shieldX1: 305,   // 盾牌：右沿正好是积石区的左壁
+  pushExhaust: 62,          // 体力耗尽时国王被推向左的像素
+  pressPush: 30,            // 碎石压在盾牌上 → 国王/盾牌被顶退的像素（水压感）
+
+  timeLimit: 60, addTime: 20,
+  staminaMax: 100,
+  staminaBase: 3.5,
+  healSupport: 0.55, healOther: 0.08, healDrain: 0.9,
+  healSink: 0.03,           // 石堆每下沉 1px 回复的体力
+  collapseAt: 0.10, collapseBlocks: 3,
+  collapseSupport: 6,   // 支撑柱剩 ≤ 此数 → 积石失去依托，整体垮塌（通关）
+
+  // ---- 矿石物理（细碎石流：像水一样往空隙里淌） ----
+  stoneR: 19,               // 岩块：约为原来 3 倍大小（面积），仍比格子小
+  stoneCount: 0,            // 0 = 按六边形密排自动铺满积石区（>0 则强制指定数量）
+  packX: 1.00,              // 六边形密排：同行间距系数（<1 更挤、缝隙更小）
+  packY: 1.00,              // 六边形密排：行距系数
+  packEdge: 0.62,           // 边缘留白（×石半径）：越小越贴边填满
+  drawR: 1.08,              // 视觉半径 / 碰撞半径：略大于 1 让石头咬合，缝隙更小
+  grav: 1050,             // 下落更缓 → 像流水缓缓淌下，不是整块砸落
+  restitution: 0.02,        // 几乎不弹 → 像碎石/沙，不像皮球
+  friction: 0.02,           // 极滑 → 像流水一样顺势淌下，不堆成陡堆
+  rollK: 1.6,
+  airTumble: 4.5,           // 空中翻滚
+  settleV: 12,              // 低于此速且接触中 → 静置
+  creep: 150,              // 朝通道口爬行的速度（兜底保证漏光，弱值 → 不破坏找平）
+  creepV: 150,              // 速度低于此值才爬行（大石头会轻微抖动，阈值要够高）
+  jitter: 0,                // 常态振动（0 = 不抖）
+  jitterRescue: 5200,       // 卡住超过 1.2s 才逐渐加抖，把架住的拱抖散（平时完全看不出来）
+  visc: 0.60,               // 剪切带动：被流动的邻居拖着走（流动连绵的关键）
+  slide: 200,               // 表面找平：同层空出位置 → 石块滑落填补（石堆整体保持相近高度）
+  flow: 0,                 // 密度梯度驱动：0 = 关闭（会压过找平，导致贴盾牌那列先被掏空）
+  solveIter: 8,
+  fixedDt: 1/120,
+  maxVy: 480,             // 限速：流得更"粘稠"，石头连成串往下淌
+  sinkDur: 0.35,
+
+  swapDur: 0.16, clearDur: 0.24,
+
+  // ===== 写死的初始排布（地基 4 行 × 7 列）=====
+  // 第一关：地基 4 行。最右列是 0,0,4,0，左边 (行2,列8) 也是 0 ——
+  // 把它俩一换，最右列就凑成四个 0，整列打通，碎石立刻顺着这条通道流下去。
+  // 第一关：地基 4 行 × 7 列。最右列是 0,0,1,0，左边 (行2,列5) 也是 0 ——
+  // 把它俩一换，最右列就凑成四个 0，整列打通，岩块立刻顺着这条通道流下去。
+  LAYOUT: [
+    [3,1,4,1,1,4,0],
+    [0,2,0,3,4,1,0],
+    [1,3,3,2,1,0,1],
+    [3,3,1,3,4,2,0],
+  ],
+};
+const TOTAL = CFG.rockRows + CFG.groundRows;          // 12
+const ICON_COLS = ["#ff5a6a","#ff9c3a","#ffd23f","#4fd06a","#48b6ff","#b07bff"];
+const ICON_DARK = ["#c5303f","#c96d18","#c99a12","#2b9445","#1f7fc4","#7d4cc4"];
+const STONE_COLS = ["#6f7278","#5b5e66","#7b7e86","#4a4d55","#676a72"];
+
+/* ==================== 工具 ==================== */
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const overlay = document.getElementById("overlay");
+const card = document.getElementById("card");
+
+const clamp = (v,a,b)=>v<a?a:(v>b?b:v);
+const lerp = (a,b,t)=>a+(b-a)*t;
+const rand = (a,b)=>a+Math.random()*(b-a);
+const hash = i=>{ const s=Math.sin(i*127.1+11.7)*43758.5453; return s-Math.floor(s); };
+const tx = c => CFG.gridX + c*CFG.cell;
+const ty = ri => CFG.gridY + (ri - CFG.rockRows)*CFG.cell;
+const boardTop = () => ty(0);
+const boardBot = () => ty(TOTAL);
+// 漏石线：最底行上沿再往下 14px —— 矿石一进入最底行就沉走（等价于旧版"落到最底行即漏"）；
+// 停在最后一行方块上时中心 y≈706，远在漏石线之上，不会被误判
+const drainY = () => ty(TOTAL-1)+14;
+const isSupportCol = c => c >= CFG.rockCol0;
+
+/* ==================== 音效 ==================== */
+let actx=null, soundOn=true;
+function ac(){
+  if(!actx){ const A=window.AudioContext||window.webkitAudioContext; if(!A) return null; actx=new A(); }
+  if(actx.state==="suspended") actx.resume();
+  return actx;
+}
+function tone(freq,dur,type,vol,slide){
+  if(!soundOn) return; const a=ac(); if(!a) return;
+  const o=a.createOscillator(), g=a.createGain();
+  o.type=type||"sine"; o.frequency.setValueAtTime(freq,a.currentTime);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(60,freq+slide),a.currentTime+dur);
+  g.gain.setValueAtTime(vol||0.12,a.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0008,a.currentTime+dur);
+  o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+dur+0.03);
+}
+function noise(dur,vol){
+  if(!soundOn) return; const a=ac(); if(!a) return;
+  const len=Math.max(1,Math.floor(a.sampleRate*dur));
+  const buf=a.createBuffer(1,len,a.sampleRate), d=buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,1.8);
+  const s=a.createBufferSource(); s.buffer=buf;
+  const g=a.createGain(); g.gain.value=vol||0.18;
+  s.connect(g); g.connect(a.destination); s.start();
+}
+
+/* ==================== 状态 ==================== */
+let G, board;
+function reset(){
+  G = {
+    state:"ready", t:0, finalT:0,
+    timeLeft: CFG.timeLimit,
+    push: CFG.pressPush, press: 1,
+    stamina: CFG.staminaMax,
+    score:0, cleared:0, combo:0, comboT:0,
+    fx:[], parts:[],
+    sel:null, drag:false,
+    phase:"idle", phT:0, sa:null, sb:null,
+    flash:0, shake:0, endT:0,
+    pillar: new Array(CFG.cols).fill(0),
+    stones:[], stonesTotal:0, stonesGone:0,
+    loseReason:"", reshuffles:0, crush:false,
+    collapsing:false, collapseT:0,
+    items:{ clear:3, time:3 }, itemFx:0,
+    pileY:null, pileSunk:0,
+  };
+  board = [];
+  for(let ri=0; ri<TOTAL; ri++) board[ri] = new Array(CFG.cols).fill(null);
+
+  fillBlocks();
+
+  // 岩块：在积石区里按六边形密排铺满（最密的自然堆积方式），再轻微沉降咬合
+  const r=CFG.stoneR;
+  // 边缘只留半个石头 → 边角也被石头盖住，看起来是"填满"而不是"堆在中间"
+  const pitL = shieldRight()+r*CFG.packEdge;
+  const pitR = tx(CFG.cols)-r*CFG.packEdge;
+  const pitTop = boardTop()+r*CFG.packEdge;
+  const pitBot = CFG.gridY-r*CFG.packEdge;
+  const colW = r*2*CFG.packX;                 // 同行间距
+  const rowH = r*Math.sqrt(3)*CFG.packY;      // 行距（六边形密排 = √3·r）
+  G.stones=[];
+  for(let row=0; ; row++){
+    const y = pitTop + row*rowH;
+    if(y > pitBot) break;
+    const off = (row%2) ? colW*0.5 : 0;
+    for(let x = pitL + off; x <= pitR; x += colW){
+      G.stones.push(makeStone(x + rand(-1.2,1.2), y + rand(-0.8,0.8)));
+    }
+  }
+  G.stonesTotal = G.stones.length;
+  for(let k=0;k<260;k++) physicsStep(CFG.fixedDt);   // 轻沉降 → 咬合自然，不塌成斜坡
+  for(const p of G.stones){ p.vx=0; p.vy=0; p.av=0; p.sq=0; }
+}
+
+function makeBlock(ri,c,color,fromTop){
+  const o = { kind:"block", color, ri, c, px:tx(c), py:ty(ri), dying:false };
+  if(fromTop) o.py = ty(ri) - 420 - rand(0,180);
+  return o;
+}
+function fillBlocks(){
+  const L = CFG.LAYOUT;
+  for(let ri=CFG.rockRows; ri<TOTAL; ri++){
+    const row = L[(ri-CFG.rockRows) % L.length];
+    for(let c=0;c<CFG.cols;c++) board[ri][c] = makeBlock(ri, c, row[c % row.length], true);
+  }
+}
+
+/* ==================== 矿石物理（自由堆积 / 滚落） ==================== */
+function makeStone(x,y){
+  const seed=Math.floor(rand(0,9999));
+  return { x, y, r:CFG.stoneR, vx:0, vy:0,
+           a:rand(0,6.28), av:0,
+           seed,
+           pts: stonePtsLocal(seed),         // 轮廓只算一次，绘制时靠 rotate 转
+           tumble: rand(0,1)<0.5 ? -1 : 1,   // 空中翻滚方向（每颗固定）
+           sq:0, sinking:false, sinkT:0 };
+}
+// 沿法线弹开 + 切向摩擦 → 滚动
+function bounceN(p,nx,ny){
+  p.touched=true;
+  const vn=p.vx*nx+p.vy*ny;
+  if(vn>=0) return;
+  const e=CFG.restitution;
+  p.vx-=(1+e)*vn*nx; p.vy-=(1+e)*vn*ny;
+  const txv=-ny, tyv=nx;
+  const vt=p.vx*txv+p.vy*tyv;
+  const f=CFG.friction;
+  p.vx-=vt*txv*f; p.vy-=vt*tyv*f;
+  p.av = lerp(p.av, (vt/p.r)*CFG.rollK, 0.4);      // 滚动角速度
+  const imp=Math.min(1,(-vn)/1000);
+  if(imp>0.04) p.sq=Math.min(0.36, p.sq+imp*0.32); // 撞击压扁
+}
+// 圆 vs 矩形
+function hitBox(p,bx,by,bw,bh){
+  const R=p.r;
+  const qx=clamp(p.x,bx,bx+bw), qy=clamp(p.y,by,by+bh);
+  const dx=p.x-qx, dy=p.y-qy;
+  if(dx===0&&dy===0){
+    const top=p.y-by, bot=by+bh-p.y, left=p.x-bx, right=bx+bw-p.x;
+    const m=Math.min(top,bot,left,right);
+    if(m===top){ p.y=by-R; bounceN(p,0,-1); }
+    else if(m===bot){ p.y=by+bh+R; bounceN(p,0,1); }
+    else if(m===left){ p.x=bx-R; bounceN(p,-1,0); }
+    else { p.x=bx+bw+R; bounceN(p,1,0); }
+    return;
+  }
+  const d2=dx*dx+dy*dy;
+  if(d2>=R*R) return;
+  const d=Math.sqrt(d2)||1e-4;
+  const nx=dx/d, ny=dy/d, pen=R-d;
+  p.x+=nx*pen; p.y+=ny*pen;
+  bounceN(p,nx,ny);
+}
+// 与地基方块碰撞
+function stoneVsBlocks(p){
+  const R=p.r;
+  const c0=Math.max(0,Math.floor((p.x-R-CFG.gridX)/CFG.cell));
+  const c1=Math.min(CFG.cols-1,Math.floor((p.x+R-CFG.gridX)/CFG.cell));
+  const r0=Math.max(CFG.rockRows,Math.floor((p.y-R-CFG.gridY)/CFG.cell)+CFG.rockRows);
+  const r1=Math.min(TOTAL-1,Math.floor((p.y+R-CFG.gridY)/CFG.cell)+CFG.rockRows);
+  for(let ri=r0;ri<=r1;ri++) for(let c=c0;c<=c1;c++){
+    const b=board[ri][c];
+    if(!b||b.kind!=="block"||b.dying) continue;
+    hitBox(p,tx(c),ty(ri),CFG.cell,CFG.cell);
+  }
+}
+// 石 vs 石
+function hitPair(a,b){
+  const dx=b.x-a.x, dy=b.y-a.y, R=a.r+b.r;
+  const d2=dx*dx+dy*dy;
+  if(d2>=R*R||d2<1e-8) return;
+  const d=Math.sqrt(d2), nx=dx/d, ny=dy/d, pen=R-d;
+  a.touched=true; b.touched=true;
+  a.x-=nx*pen*0.5; a.y-=ny*pen*0.5;
+  b.x+=nx*pen*0.5; b.y+=ny*pen*0.5;
+  const rvn=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+  if(rvn<0){
+    const j=-(1+CFG.restitution)*rvn*0.5;
+    a.vx-=j*nx; a.vy-=j*ny; b.vx+=j*nx; b.vy+=j*ny;
+    const txv=-ny, tyv=nx;
+    const vt=(b.vx-a.vx)*txv+(b.vy-a.vy)*tyv;
+    const f=CFG.friction*0.6;
+    a.vx+=vt*txv*f*0.5; a.vy+=vt*tyv*f*0.5;
+    b.vx-=vt*txv*f*0.5; b.vy-=vt*tyv*f*0.5;
+  }
+}
+/* --- 空间哈希：石粒很多，O(n²) 太慢，按格分桶只查邻居 --- */
+let _hash=null;
+function rebuildHash(){
+  const cs=CFG.stoneR*2.4;
+  const map=new Map();
+  for(const p of G.stones){
+    if(p.sinking) continue;
+    const k=Math.floor(p.x/cs)+","+Math.floor(p.y/cs);
+    let a=map.get(k); if(!a){ a=[]; map.set(k,a); }
+    a.push(p);
+  }
+  _hash={cs,map};
+}
+function solvePairs(){
+  const cs=_hash.cs, map=_hash.map;
+  for(const p of G.stones){
+    if(p.sinking) continue;
+    const gx=Math.floor(p.x/cs), gy=Math.floor(p.y/cs);
+    for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){
+      const a=map.get((gx+dx)+","+(gy+dy));
+      if(!a) continue;
+      for(const q of a) if(q!==p && !q.sinking) hitPair(p,q);
+    }
+  }
+}
+// 左右边界：地面以上被盾牌挡住（盾面在哪，碎石就贴到哪），淌进地基层后横向自由
+function leftBoundAt(y){ return y < CFG.gridY - CFG.stoneR*0.5 ? shieldRight() : CFG.gridX; }
+// 盾牌右沿：碎石像水一样压在盾面上，国王被顶得后退 → 盾面跟着左移，碎石立刻贴上去
+function shieldRight(){ return CFG.shieldX1 - (G.push||0); }
+// 水压：还在堆里的碎石越多，压在盾牌上的压力越大
+function updatePressure(dt){
+  let live=0;
+  for(const p of G.stones) if(!p.sinking) live++;
+  const st=clamp(G.stamina/CFG.staminaMax,0,1);
+  const target = CFG.pressPush*(live/Math.max(1,G.stonesTotal)) + (1-st)*CFG.pushExhaust;
+  G.press = live/Math.max(1,G.stonesTotal);
+  G.push = lerp(G.push||0, target, 1-Math.exp(-dt*5));   // 平滑，避免抽搐
+}
+// 通到底的开口列（整列没有方块 → 碎石能从这里漏走）
+function computeOpenCols(){
+  const a=[];
+  for(let c=0;c<CFG.cols;c++){
+    let empty=true;
+    for(let r=CFG.rockRows;r<TOTAL;r++) if(board[r][c]){ empty=false; break; }
+    if(empty) a.push(c);
+  }
+  return a;
+}
+// 该点是否被方块占据（判断"旁边是墙还是空地"）
+function solidAt(x,y){
+  if(y < CFG.gridY) return false;              // 积石区无方块
+  if(y >= boardBot()-1) return true;           // 地面
+  const c=Math.floor((x-CFG.gridX)/CFG.cell);
+  const ri=Math.floor((y-CFG.gridY)/CFG.cell)+CFG.rockRows;
+  if(c<0||c>=CFG.cols||ri<CFG.rockRows||ri>=TOTAL) return false;
+  const b=board[ri][c];
+  return !!(b && b.kind==="block" && !b.dying);
+}
+function physicsStep(h){
+  const Rr=tx(CFG.cols), bot=boardBot();
+  const openCols=G._openCols;
+  for(const p of G.stones){
+    if(p.sinking) continue;
+    p.vy=Math.min(CFG.maxVy, p.vy+CFG.grav*h);
+    p.x+=p.vx*h; p.y+=p.vy*h;
+    p.touched=false;
+  }
+  for(let it=0; it<CFG.solveIter; it++){
+    rebuildHash();          // 位置变了，桶要重建
+    solvePairs();           // 石 vs 石
+    for(const p of G.stones){
+      if(p.sinking) continue;
+      stoneVsBlocks(p);
+      const L=leftBoundAt(p.y);
+      if(p.x<L+p.r){ p.x=L+p.r; if(p.vx<0){ p.vx=-p.vx*CFG.restitution; } p.touched=true; }
+      if(p.x>Rr-p.r){ p.x=Rr-p.r; if(p.vx>0){ p.vx=-p.vx*CFG.restitution; } p.touched=true; }
+    }
+  }
+  for(const p of G.stones){
+    if(p.sinking){ p.sinkT+=h; p.y+=190*h; p.a+=2.6*h; continue; }
+    // —— 一次遍历采集邻居信息：左右密度 / 上方压力 / 邻居平均速度 / 侧下方支撑 ——
+    const cs=_hash?_hash.cs:CFG.stoneR*2.4;
+    const gx=Math.floor(p.x/cs), gy=Math.floor(p.y/cs), map=_hash?_hash.map:null;
+    let nL=0,nR=0,nUp=0, svx=0, svy=0, sn=0;
+    let flatL=false, flatR=false, dnC=false, dnL=false, dnR=false;
+    const R=CFG.stoneR;
+    if(map){
+      for(let dx=-2;dx<=2;dx++) for(let dy=-2;dy<=2;dy++){
+        const a=map.get((gx+dx)+","+(gy+dy)); if(!a) continue;
+        for(const q of a){ if(q===p||q.sinking) continue;
+          const qdx=q.x-p.x, qdy=q.y-p.y, d2=qdx*qdx+qdy*qdy;
+          if(d2>(R*4.2)*(R*4.2)) continue;
+          if(d2<=R*R*2.2*2.2){
+            if(qdy<-R*0.6) nUp++;
+            else if(Math.abs(qdy)<R*1.4){ if(qdx<0) nL++; else nR++; }
+            svx+=q.vx; svy+=q.vy; sn++;
+          }
+          // 同高度层（±1.6R）的水平邻居 → 判断哪一侧是空地
+          if(Math.abs(qdy)<R*1.6){
+            if(qdx<-R*0.4 && qdx>-R*4.2) flatL=true;
+            if(qdx> R*0.4 && qdx< R*4.2) flatR=true;
+          }
+          // 下方支撑：正下 / 左下 / 右下
+          if(qdy>R*0.4 && d2<(R*3.2)*(R*3.2)){
+            if(Math.abs(qdx)<R*0.75) dnC=true;
+            else if(qdx<0) dnL=true;
+            else dnR=true;
+          }
+        }
+      }
+    }
+    // 旁边的方块/墙壁也算支撑（不然会朝墙里滑）
+    if(!flatL) flatL = solidAt(p.x-R*1.7, p.y) || p.x-R*1.7 < leftBoundAt(p.y);
+    if(!flatR) flatR = solidAt(p.x+R*1.7, p.y) || p.x+R*1.7 > tx(CFG.cols);
+    if(!dnC) dnC = solidAt(p.x, p.y+R*1.5) || p.y+R*1.5 > boardBot()-2;
+    if(!dnL) dnL = solidAt(p.x-R*1.2, p.y+R*1.2);
+    if(!dnR) dnR = solidAt(p.x+R*1.2, p.y+R*1.2);
+    // ① 剪切带动：被运动更快的邻居拖着走 —— 一颗动了会拉着一片跟着动，
+    //    流动才是连绵的"流"，而不是"塌一批、卡住、再塌一批"。
+    //    只在邻居更快时生效（否则会把流动的石头拖停，整堆冻结）
+    if(sn>0 && CFG.visc>0){
+      const nvx=svx/sn, nvy=svy/sn;
+      const nsp=Math.hypot(nvx,nvy), msp=Math.hypot(p.vx,p.vy);
+      if(nsp>15 && nsp>msp*1.15){
+        const k=Math.min(0.85, CFG.visc*h*60);
+        p.vx = lerp(p.vx, nvx, k);
+        p.vy = lerp(p.vy, nvy, k);
+      }
+    }
+    // ② 表面找平：同高度层哪一侧是空的，就往那侧滑下去填补 ——
+    //    沙堆的自然休止角行为，石堆表面会趋于一致高度，而不是各列各塌各的
+    let slide=0;
+    // 只有"被上方压着"或"脚下某一侧悬空"时才滑 —— 密排静止的石堆因此完全不动，
+    // 不会出现肉眼可见的缓慢蠕动；但一旦下方被掏空，石块立刻滑落填补
+    if(p.touched && CFG.slide>0 && dnC && (nUp>0 || !dnL || !dnR)){
+      if(!flatL && flatR) slide=-1;              // 左边同高度是空的 → 往左滑
+      else if(!flatR && flatL) slide=1;           // 右边空 → 往右滑
+      else if(!flatL && !flatR){                  // 两侧都空 → 往斜下方更空的一侧
+        if(!dnL && dnR) slide=-1;
+        else if(dnL && !dnR) slide=1;
+        else if(!dnL && !dnR) slide = (nL<=nR)? -1 : 1;
+      }
+    }
+    if(slide) p.vx += slide*CFG.slide*h*60;
+    // ③ 密度梯度驱动：往邻居更少（更空）的一侧挤 —— 局部规则自然长出"水往开口处淌"
+    if(p.touched && CFG.flow>0){
+      const diff=nR-nL;
+      if(diff!==0 && (nUp>0 || Math.abs(diff)>=2))
+        p.vx -= Math.sign(diff)*CFG.flow*h*60*Math.min(1,Math.abs(diff)/3);
+    }
+    // 朝最近的"通到底的开口列"缓慢爬行（兜底，保证一定能漏光）
+    let creepDir=0;
+    if(p.touched && openCols && openCols.length && Math.hypot(p.vx,p.vy)<CFG.creepV){
+      let bx=null, bd=1e9;
+      for(let i=0;i<openCols.length;i++){
+        const cx=tx(openCols[i])+CFG.cell/2, d=Math.abs(cx-p.x);
+        if(d<bd){ bd=d; bx=cx; }
+      }
+      if(bx!==null && bd>CFG.stoneR*0.6) creepDir = Math.sign(bx-p.x);
+    }
+    if(creepDir) p.vx = lerp(p.vx, creepDir*CFG.creep, 0.10);
+    // 破拱振动：大石块容易在通道口架成拱，用微抖把它抖散（颗粒流的自然行为）
+    const stuckFor=(G.sinceDrain||0)-1.2;
+    const jt = CFG.jitter + (stuckFor>0 ? Math.min(stuckFor,3)*CFG.jitterRescue : 0);
+    if(jt>0 && p.touched && openCols && openCols.length && p.y < CFG.gridY - CFG.stoneR*0.3){
+      p.vx += (Math.random()-0.5)*jt*h;
+      p.vy += (Math.random()-0.5)*jt*h*0.5;
+    }
+    // 静置判定：邻居也在动就别把自己钉死 → 流是连续的，不会走走停停
+    const hoodStill = sn===0 || Math.hypot(svx/sn, svy/sn) < CFG.settleV*0.5;
+    // 下方悬空或还能往旁边滑，就绝不停住 → 石头不会"被看不见的框子托在半空"
+    const settled = p.touched && !creepDir && !slide && dnC && hoodStill
+                    && Math.hypot(p.vx,p.vy)<CFG.settleV;
+    if(settled){ p.vx=0; p.vy=0; p.av*=0.75; }
+    else if(!p.touched && p.vy>140){
+      p.av = lerp(p.av, p.tumble*CFG.airTumble, 0.06);   // 空中翻滚
+    }
+    p.a += p.av*h;
+    p.av *= 0.994;
+    if(Math.abs(p.av)>14) p.av=Math.sign(p.av)*14;
+    if(p.sq>0) p.sq=Math.max(0,p.sq-h*2.8);
+    // 漏石：石粒淌到最底行以下 → 从排石口沉走（任何列通到底都能漏，不再限死右侧四列）
+    if(p.y>drainY()){
+      p.sinking=true; p.sinkT=0; p.y=Math.max(p.y, bot+6); G.stonesGone++; G.score+=20; G.sinceDrain=0;
+      G.stamina=Math.min(CFG.staminaMax, G.stamina+CFG.healDrain);
+      noise(0.22,0.12); tone(120+rand(0,40),0.16,"sine",0.07,-40);
+    }
+  }
+  for(let i=G.stones.length-1;i>=0;i--)
+    if(G.stones[i].sinking && G.stones[i].sinkT>=CFG.sinkDur) G.stones.splice(i,1);
+}
+let physAcc=0;
+function stepStones(dt){
+  physAcc+=dt;
+  G._openCols=computeOpenCols();
+  updatePressure(dt);
+  G.sinceDrain=(G.sinceDrain||0)+dt;
+  const h=CFG.fixedDt; let n=0;
+  while(physAcc>=h && n<8){ physicsStep(h); physAcc-=h; n++; }
+  if(physAcc>h*8) physAcc=0;
+}
+// 兜底：方块快没了 / 只剩几颗时，残余碎石自行滚落（永不卡死）
+function forceCollapse(){
+  // 压碎模式：积石失去依托时，连残余的支撑柱一起压碎（保证一定打得通）
+  if(G.crush){
+    // 支撑柱被压碎：整排一次性崩掉，石头随后自由坠落
+    for(let ri=TOTAL-1; ri>=CFG.rockRows; ri--) for(let c=CFG.cols-1; c>=CFG.rockCol0; c--){
+      const x=board[ri][c];
+      if(x && x.kind==="block"){
+        board[ri][c]=null; G.cleared++;
+        for(let i=0;i<6;i++) G.parts.push({x:tx(c)+CFG.cell/2, y:ty(ri)+CFG.cell/2,
+          vx:rand(-180,180), vy:rand(-260,-20), g:900, life:rand(0.4,0.8), t:0, s:rand(4,9), color:2});
+      }
+    }
+    G.shake=Math.max(G.shake,9);
+    noise(0.35,0.20); tone(170+rand(0,40),0.3,"square",0.09,-50);
+    return;
+  }
+  let pick=null;
+  for(const p of G.stones){ if(p.sinking) continue; if(!pick||p.y>pick.y) pick=p; }
+  if(!pick) return;
+  pick.sinking=true; pick.sinkT=0; G.stonesGone++;
+  G.stamina=Math.min(CFG.staminaMax, G.stamina+CFG.healDrain*0.5);
+  noise(0.18,0.11); tone(140+rand(0,30),0.14,"sine",0.06,-30);
+}
+
+/* ==================== 判定 / 消除 ==================== */
+function findMatchCells(){
+  const set = new Set();
+  const at=(r,c)=>{ const x=(r>=0&&r<TOTAL&&c>=0&&c<CFG.cols)?board[r][c]:null; return (x&&x.kind==="block")?x.color:-1; };
+  for(let r=CFG.rockRows;r<TOTAL;r++){
+    let run=1;
+    for(let c=1;c<=CFG.cols;c++){
+      const same = c<CFG.cols && at(r,c)>=0 && at(r,c)===at(r,c-1);
+      if(same) run++;
+      else { if(run>=3) for(let k=c-run;k<c;k++) set.add(r+","+k); run=1; }
+    }
+  }
+  for(let c=0;c<CFG.cols;c++){
+    let run=1;
+    for(let r=CFG.rockRows+1;r<=TOTAL;r++){
+      const same = r<TOTAL && at(r,c)>=0 && at(r,c)===at(r-1,c);
+      if(same) run++;
+      else { if(run>=3) for(let k=r-run;k<r;k++) set.add(k+","+c); run=1; }
+    }
+  }
+  return set;
+}
+function expandGroups(seeds){
+  const used=new Set(), groups=[];
+  for(const key of seeds){
+    if(used.has(key)) continue;
+    const [r0,c0]=key.split(",").map(Number);
+    const c0cell=board[r0][c0]; if(!c0cell||c0cell.kind!=="block"||c0cell.dying) continue;
+    const col=c0cell.color, grp=[], seen=new Set([key]), st=[[r0,c0]];
+    while(st.length){
+      const [r,c]=st.pop(); grp.push({r,c}); used.add(r+","+c);
+      for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const nr=r+dr,nc=c+dc,k=nr+","+nc;
+        if(nr<CFG.rockRows||nr>=TOTAL||nc<0||nc>=CFG.cols) continue;
+        if(seen.has(k)) continue;
+        const x=board[nr][nc];
+        if(!x||x.kind!=="block"||x.dying||x.color!==col) continue;
+        seen.add(k); st.push([nr,nc]);
+      }
+    }
+    groups.push(grp);
+  }
+  return groups;
+}
+function swapCells(a,b){
+  const ca=board[a.r][a.c], cb=board[b.r][b.c];
+  board[a.r][a.c]=cb; board[b.r][b.c]=ca;
+  ca.r=b.r; ca.c=b.c; cb.r=a.r; cb.c=a.c;
+  return [ca,cb];
+}
+function isBlock(r,c){
+  const x=(r>=0&&r<TOTAL&&c>=0&&c<CFG.cols)?board[r][c]:null;
+  return !!(x && x.kind==="block" && !x.dying);
+}
+function tryMove(a,b){
+  if(!isBlock(a.r,a.c)||!isBlock(b.r,b.c)) return false;
+  swapCells(a,b);
+  const ok=findMatchCells().size>0;
+  swapCells(a,b);
+  return ok;
+}
+function hasAnyMove(){
+  for(let r=CFG.rockRows;r<TOTAL;r++) for(let c=0;c<CFG.cols;c++){
+    if(!isBlock(r,c)) continue;
+    if(c+1<CFG.cols && isBlock(r,c+1) && tryMove({r,c},{r,c:c+1})) return true;
+    if(r+1<TOTAL && isBlock(r+1,c) && tryMove({r,c},{r:r+1,c})) return true;
+  }
+  return false;
+}
+// 石堆对国王的压力：石头沉得越深，压在国王身上的分量越轻
+function restY(r){ return CFG.gridY - (r||CFG.stoneR); }
+function pileLoad(){
+  let s2=0;
+  for(const p of G.stones){
+    if(p.sinking) continue;
+    const relief = clamp((p.y - restY(p.r)) / Math.max(1, drainY() - restY(p.r)), 0, 1);
+    s2 += 1-relief;
+  }
+  return clamp(s2/Math.max(1,G.stonesTotal), 0, 1);
+}
+function updatePileRelief(dt){
+  let sum=0,n=0;
+  for(const p of G.stones){ if(p.sinking) continue; sum+=p.y; n++; }
+  if(!n) return;
+  const mean=sum/n;
+  if(G.pileY===null||G.pileY===undefined){ G.pileY=mean; return; }
+  const d=mean-G.pileY;
+  if(d>0.02){ G.stamina=Math.min(CFG.staminaMax, G.stamina + d*CFG.healSink); G.pileSunk+=d; }
+  G.pileY=mean;
+}
+function stonesLeft(){ return G.stonesTotal - G.stonesGone; }
+function supportBlocksLeft(){
+  let n=0;
+  for(let ri=CFG.rockRows;ri<TOTAL;ri++) for(let c=CFG.rockCol0;c<CFG.cols;c++) if(isBlock(ri,c)) n++;
+  return n;
+}
+function blocksLeft(){
+  let n=0;
+  for(let ri=CFG.rockRows;ri<TOTAL;ri++) for(let c=0;c<CFG.cols;c++) if(isBlock(ri,c)) n++;
+  return n;
+}
+function colOpen(c){
+  for(let ri=CFG.rockRows;ri<TOTAL;ri++) if(board[ri][c]) return false;
+  return true;
+}
+
+/* ==================== 保底：重排剩余方块 ==================== */
+function shuffleArr(a){
+  for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [a[i],a[j]]=[a[j],a[i]]; }
+  return a;
+}
+function makesTriple(r,c,col){
+  const L=(rr,cc)=>{ const x=(rr>=CFG.rockRows&&rr<TOTAL&&cc>=0&&cc<CFG.cols)?board[rr][cc]:null; return (x&&x.kind==="block")?x.color:-1; };
+  if(L(r,c-1)===col && L(r,c-2)===col) return true;
+  if(L(r-1,c)===col && L(r-2,c)===col) return true;
+  return false;
+}
+function cellHasStone(ri,c){
+  const x0=tx(c), y0=ty(ri);
+  for(const p of G.stones){
+    if(p.sinking) continue;
+    if(p.x>x0-6 && p.x<x0+CFG.cell+6 && p.y>y0-6 && p.y<y0+CFG.cell+6) return true;
+  }
+  return false;
+}
+// 重排 = 原地换色（方块不移动！）—— 保住已经打通的空洞，否则之前的进度会被抹掉
+function reshuffleBlocks(){
+  const cells=[];
+  for(let ri=CFG.rockRows;ri<TOTAL;ri++) for(let c=0;c<CFG.cols;c++){
+    const x=board[ri][c];
+    if(x&&x.kind==="block") cells.push(x);
+  }
+  if(cells.length<3){
+    // 方块太少凑不出三连 → 交给残石垮落收尾，永不卡死
+    G.collapsing=true; G.collapseT=0;
+    G.phase="idle"; G.sel=null; G.drag=false;
+    return;
+  }
+  const cnt=new Array(ICON_COLS.length).fill(0);
+  cells.forEach(x=>cnt[x.color]++);
+  let big=0; for(let k=1;k<cnt.length;k++) if(cnt[k]>cnt[big]) big=k;
+  let pool=cells.map(x=>x.color);
+  for(let k=0;k<cnt.length;k++) if(k!==big && cnt[k]>0 && cnt[k]<3){
+    pool=pool.map(v=>v===k?big:v); cnt[big]+=cnt[k]; cnt[k]=0;
+  }
+  const orig=cells.map(x=>x.color);
+
+  let ok=false;
+  for(let attempt=0; attempt<160 && !ok; attempt++){
+    const rem=shuffleArr(pool.slice());
+    // 贪心落色：优先选不会立刻凑成三连的颜色
+    for(let i=0;i<cells.length;i++){
+      const x=cells[i];
+      let idx=rem.findIndex(col=>!makesTriple(x.ri,x.c,col));
+      if(idx<0) idx=0;
+      x.color=rem.splice(idx,1)[0];
+    }
+    ok = findMatchCells().size===0 && hasAnyMove();
+  }
+  if(!ok){
+    cells.forEach((x,i)=>x.color=orig[i]);
+    if(!recolorSolvable()){
+      // 方块散得连换色都救不回来 → 积石失去依托，压碎残余支柱（永不卡死）
+      G.collapsing=true; G.collapseT=0; G.crush=true;
+      G.phase="idle"; G.sel=null; G.drag=false; G.reshuffles++;
+      G.flash=0.3; noise(0.5,0.22); tone(150,0.4,"sawtooth",0.11,-60);
+      return;
+    }
+  }
+  for(const x of cells) x.dying=false;
+  G.flash=0.25;
+  G.phase="idle"; G.phT=0; G.sel=null; G.drag=false; G.reshuffles++;
+  noise(0.40,0.18); tone(520,0.16,"triangle",0.09,220); tone(700,0.16,"triangle",0.07);
+}
+// 兜底：只改颜色、不移动方块，造出一个"换一步就能消"的局面
+function recolorSolvable(){
+  const at=(r,c)=>{
+    const x=(r>=CFG.rockRows&&r<TOTAL&&c>=0&&c<CFG.cols)?board[r][c]:null;
+    return (x&&x.kind==="block")?x:null;
+  };
+  // 形如 X ? X：把 ? 的某个邻格染成 X，交换后 ? 位就变成 X → 三连
+  for(let r=CFG.rockRows;r<TOTAL;r++) for(let c=0;c<CFG.cols;c++){
+    const m=at(r,c); if(!m) continue;
+    const pats=[[at(r,c-1),at(r,c+1)],[at(r-1,c),at(r+1,c)]];
+    for(const [p,q] of pats){
+      if(!p||!q) continue;
+      if(p.color!==q.color || p.color===m.color) continue;
+      const col=p.color;
+      for(const n of [at(r,c-1),at(r,c+1),at(r-1,c),at(r+1,c)]){
+        if(!n||n===m) continue;
+        const on=n.color;
+        n.color=col;
+        if(findMatchCells().size===0 && hasAnyMove()) return true;
+        n.color=on;
+      }
+    }
+  }
+  return false;
+}
+
+/* ==================== 棋盘时序 ==================== */
+const isBusy = ()=> G.phase!=="idle" && G.phase!=="done";
+function snapBlocks(){
+  for(let ri=CFG.rockRows;ri<TOTAL;ri++) for(let c=0;c<CFG.cols;c++){
+    const x=board[ri][c]; if(!x) continue;
+    x.px=tx(c); x.py=ty(ri);
+  }
+}
+function stepBoard(dt){
+  G.phT+=dt;
+  if(G.phase==="swap"){
+    if(G.phT>=CFG.swapDur){
+      snapBlocks();
+      const seeds=findMatchCells();
+      if(seeds.size){ G.phase="clear"; G.phT=0; doClear(seeds); }
+      else { swapCells(G.sa,G.sb); G.phase="swapback"; G.phT=0; tone(150,0.09,"square",0.05); }
+    }
+  }
+  else if(G.phase==="swapback"){
+    if(G.phT>=CFG.swapDur){ snapBlocks(); G.phase="idle"; }
+  }
+  else if(G.phase==="clear"){
+    if(G.phT>=CFG.clearDur){
+      for(let ri=CFG.rockRows;ri<TOTAL;ri++) for(let c=0;c<CFG.cols;c++){
+        const x=board[ri][c];
+        if(x && x.kind==="block" && x.dying) board[ri][c]=null;   // 不补新方块
+      }
+      G.phase="fall"; G.phT=0;
+    }
+  }
+  else if(G.phase==="fall"){
+    if(G.phT>=0.28){ G.phase="idle"; ensureProgress(); }
+  }
+}
+function ensureProgress(){
+  if(G.state!=="playing") return;
+  if(stonesLeft()<=0){ win(); return; }
+  if(!hasAnyMove() || blocksLeft()<3) reshuffleBlocks();
+}
+function burstAt(r,c){
+  G.fx.push({x:tx(c)+CFG.cell/2, y:ty(r)+CFG.cell/2, color:2, t:0, life:CFG.clearDur});
+  for(let i=0;i<6;i++) G.parts.push({
+    x:tx(c)+CFG.cell/2, y:ty(r)+CFG.cell/2,
+    vx:rand(-160,160), vy:rand(-240,-40), g:900,
+    life:rand(0.4,0.8), t:0, s:rand(3,7), color:2 });
+}
+function doClear(seeds){
+  const groups=expandGroups(seeds);
+  if(!groups.length){ G.phase="fall"; G.phT=0; return; }
+  G.combo++; G.comboT=3.0;
+  const mult=Math.min(2,1+0.1*(G.combo-1));
+  let n=0, sup=0;
+  for(const grp of groups) for(const {r,c} of grp){
+    const x=board[r][c]; if(!x||x.kind!=="block"||x.dying) continue;
+    x.dying=true; n++;
+    if(isSupportCol(c)) sup++;
+    G.fx.push({x:tx(c)+CFG.cell/2, y:ty(r)+CFG.cell/2, color:x.color, t:0, life:CFG.clearDur});
+    for(let i=0;i<5;i++) G.parts.push({
+      x:tx(c)+CFG.cell/2, y:ty(r)+CFG.cell/2,
+      vx:rand(-140,140), vy:rand(-220,-40), g:900,
+      life:rand(0.4,0.8), t:0, s:rand(3,7), color:x.color });
+  }
+  const other=n-sup;
+  const heal=(sup*CFG.healSupport+other*CFG.healOther)*(0.6+0.4*Math.min(2,mult));
+  G.cleared+=n;
+  G.score+=Math.round(10*n*mult);
+  G.stamina=Math.min(CFG.staminaMax, G.stamina+heal);
+  G.flash=0.18;
+  G.shake=Math.min(7,G.shake+(sup>0?1.2+sup*0.4:0.5));
+  noise(0.18,0.15); tone(300+Math.min(9,n)*30+(G.combo-1)*40,0.12,"triangle",0.10,120);
+}
+function win(){
+  if(G.state!=="playing") return;
+  G.state="clear"; G.endT=0; G.finalT=G.t;
+  G.shake=12; noise(0.7,0.28);
+  [523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,0.28,"triangle",0.14),i*110));
+}
+function lose(reason){
+  if(G.state!=="playing") return;
+  G.state="over"; G.endT=0; G.finalT=G.t;
+  G.loseReason=reason||"时间到！";
+  tone(220,0.5,"sawtooth",0.12,-120); noise(0.4,0.16);
+}
+
+/* ==================== 道具 ==================== */
+function useItemClear(){
+  if(G.state!=="playing" || isBusy() || G.items.clear<=0) return;
+  let best=null;
+  for(let r=CFG.rockRows;r<TOTAL;r++) for(let c=0;c<CFG.cols;c++) for(const [dr,dc] of [[0,1],[1,0]]){
+    const r2=r+dr,c2=c+dc; if(r2>=TOTAL||c2>=CFG.cols) continue;
+    if(!isBlock(r,c)||!isBlock(r2,c2)) continue;
+    swapCells({r,c},{r:r2,c:c2});
+    const seeds=findMatchCells(), grps=expandGroups(seeds);
+    let n=0,sup=0,deep=0;
+    for(const g of grps) for(const x of g){ n++; if(x.c>=CFG.rockCol0){ sup++; deep=Math.max(deep,x.r); } }
+    swapCells({r,c},{r:r2,c:c2});
+    if(n && (!best || sup*10+deep > best.sc)) best={a:{r,c},b:{r:r2,c:c2},sc:sup*10+deep};
+  }
+  if(best){
+    swapCells(best.a,best.b);
+    G.sa={r:best.a.r,c:best.a.c}; G.sb={r:best.b.r,c:best.b.c};
+    G.phase="swap"; G.phT=0;
+  } else {
+    let cnt=0;
+    for(let ri=TOTAL-1; ri>=CFG.rockRows && cnt<3; ri--)
+      for(let c=CFG.cols-1; c>=CFG.rockCol0 && cnt<3; c--){
+        if(isBlock(ri,c)){ board[ri][c]=null; burstAt(ri,c); G.cleared++; cnt++; }
+      }
+    G.phase="fall"; G.phT=0;
+    G.shake=6; noise(0.5,0.22); tone(160,0.4,"sawtooth",0.12,-80);
+  }
+  G.items.clear--; G.itemFx=0.4;
+}
+function useItemTime(){
+  if(G.state!=="playing" || G.items.time<=0) return;
+  G.timeLeft += CFG.addTime;
+  G.stamina = Math.min(CFG.staminaMax, G.stamina+15);
+  G.items.time--; G.itemFx=0.4;
+  tone(660,0.18,"triangle",0.12,220); tone(880,0.18,"triangle",0.10);
+}
+
+/* ==================== 绘制工具 ==================== */
+function rr(x,y,w,h,r){
+  r=Math.min(r,w/2,h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+}
+function shade(hex,f){
+  const n=parseInt(hex.slice(1),16);
+  return `rgb(${clamp(Math.round(((n>>16)&255)*f),0,255)},${clamp(Math.round(((n>>8)&255)*f),0,255)},${clamp(Math.round((n&255)*f),0,255)})`;
+}
+// 岩石：饱满圆润的鹅卵石轮廓（局部坐标，每颗只算一次）
+// 半径紧贴碰撞半径 → 石头之间严丝合缝，不会有空隙；只留极轻微的起伏与椭圆感
+function stonePtsLocal(seed){
+  const R=CFG.stoneR*(CFG.drawR||1);
+  const n = 14;                                            // 顶点密 → 曲线平滑
+  const sx = 0.97 + hash(seed*2.7)*0.06;                   // 轻微椭圆（±3%）
+  const sy = 0.97 + hash(seed*3.9)*0.06;
+  const ang0 = hash(seed*5.1)*6.28;
+  const pts=[];
+  for(let i=0;i<n;i++){
+    const a = ang0 + i/n*Math.PI*2;
+    const rad = R * (0.98 + hash(seed+i*3.7)*0.05);        // 0.98R~1.03R，接触时严丝合缝
+    pts.push([Math.cos(a)*rad*sx, Math.sin(a)*rad*sy]);
+  }
+  return pts;
+}
+// 渐变在局部坐标里定义，可以跨石粒复用（不用每颗每帧新建）
+const _sGrad=new Map();
+function stoneGrads(base){
+  let g=_sGrad.get(base);
+  if(!g){
+    const R=CFG.stoneR;
+    const g1=ctx.createLinearGradient(0,-R,0,R);
+    g1.addColorStop(0, shade(base,1.30));
+    g1.addColorStop(0.45, base);
+    g1.addColorStop(1, shade(base,0.62));
+    g={g1}; _sGrad.set(base,g);
+  }
+  return g;
+}
+// 石缝阴影（接触遮蔽）：先铺一层比石头略大的暗色，多颗叠加后缝隙变成石缝的阴影
+// 而不是露出背后的洞壁 → 石堆看起来是挤在一起的整体
+const _aoGrad=[];
+function aoGradient(R){
+  if(!_aoGrad[R]){
+    const g=ctx.createRadialGradient(0,0,R*0.58,0,0,R*1.42);
+    g.addColorStop(0,"rgba(14,15,21,.88)");
+    g.addColorStop(0.60,"rgba(14,15,21,.74)");
+    g.addColorStop(1,"rgba(14,15,21,0)");
+    _aoGrad[R]=g;
+  }
+  return _aoGrad[R];
+}
+function drawStoneAO(p){
+  if(p.sinking) return;
+  const R=p.r;
+  ctx.save();
+  ctx.translate(p.x,p.y);
+  ctx.fillStyle=aoGradient(R);
+  ctx.beginPath(); ctx.arc(0,0,R*1.42,0,7); ctx.fill();
+  ctx.restore();
+}
+function drawStone(p){
+  const base=STONE_COLS[p.seed%STONE_COLS.length];
+  const R=p.r, sq=p.sq||0;
+  const alpha = p.sinking ? clamp(1-p.sinkT/CFG.sinkDur,0,1) : 1;
+  const pts=p.pts;
+  ctx.save();
+  ctx.globalAlpha=alpha;
+  ctx.translate(p.x,p.y);
+  if(p.a) ctx.rotate(p.a);
+  if(sq) ctx.scale(1+sq*0.18, 1-sq*0.26);
+  // 平滑闭合曲线（经过各顶点的中点做二次贝塞尔）→ 圆润鹅卵石，不做棱角
+  const trace=()=>{
+    ctx.beginPath();
+    const n=pts.length;
+    let mx=(pts[n-1][0]+pts[0][0])/2, my=(pts[n-1][1]+pts[0][1])/2;
+    ctx.moveTo(mx,my);
+    for(let i=0;i<n;i++){
+      const q=pts[i], nx2=pts[(i+1)%n];
+      ctx.quadraticCurveTo(q[0],q[1],(q[0]+nx2[0])/2,(q[1]+nx2[1])/2);
+    }
+    ctx.closePath();
+  };
+  // 主体
+  trace();
+  ctx.fillStyle=stoneGrads(base).g1; ctx.fill();
+  ctx.save();
+  trace(); ctx.clip();
+  // 底部暗面（体积感）
+  const bg=ctx.createLinearGradient(0,-R*0.2,0,R);
+  bg.addColorStop(0,"rgba(18,20,26,0)"); bg.addColorStop(1,"rgba(18,20,26,.38)");
+  ctx.fillStyle=bg; ctx.fillRect(-R*1.2,-R*1.2,R*2.4,R*2.4);
+  // 左上柔和受光
+  const lg=ctx.createRadialGradient(-R*0.34,-R*0.38,R*0.06,-R*0.30,-R*0.34,R*0.78);
+  lg.addColorStop(0,"rgba(255,255,255,.30)"); lg.addColorStop(1,"rgba(255,255,255,0)");
+  ctx.fillStyle=lg; ctx.fillRect(-R*1.2,-R*1.2,R*2.4,R*2.4);
+  ctx.restore();
+  // 轮廓：内侧一圈微亮的岩棱 + 外侧暗描边 → 挨在一起的石头也能看出分界
+  trace();
+  ctx.strokeStyle="rgba(150,158,172,.30)"; ctx.lineWidth=1.6; ctx.stroke();
+  trace();
+  ctx.strokeStyle="rgba(18,20,26,.45)"; ctx.lineWidth=0.8; ctx.stroke();
+  ctx.restore();
+}
+// 方块图案
+function drawIcon(k, cx, cy, r){
+  const col=ICON_COLS[k], dk=ICON_DARK[k];
+  ctx.save(); ctx.translate(cx,cy);
+  ctx.fillStyle=col; ctx.strokeStyle=dk; ctx.lineWidth=2.2; ctx.lineJoin="round";
+  switch(k){
+    case 0:
+      ctx.beginPath();
+      ctx.moveTo(-r,-r*0.36); ctx.lineTo(-r*0.36,-r*0.36); ctx.lineTo(-r*0.36,-r);
+      ctx.lineTo(r*0.36,-r); ctx.lineTo(r*0.36,-r*0.36); ctx.lineTo(r,-r*0.36);
+      ctx.lineTo(r,r*0.36); ctx.lineTo(r*0.36,r*0.36); ctx.lineTo(r*0.36,r);
+      ctx.lineTo(-r*0.36,r); ctx.lineTo(-r*0.36,r*0.36); ctx.lineTo(-r,r*0.36);
+      ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+    case 1: ctx.beginPath(); ctx.arc(0,0,r*0.80,0,7); ctx.fill(); ctx.stroke(); break;
+    case 2: ctx.beginPath(); ctx.moveTo(0,-r*0.92); ctx.lineTo(r*0.88,r*0.62); ctx.lineTo(-r*0.88,r*0.62);
+      ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+    case 3: rr(-r*0.74,-r*0.74,r*1.48,r*1.48,r*0.20); ctx.fill(); ctx.stroke(); break;
+    case 4: ctx.beginPath(); ctx.moveTo(0,-r*0.94); ctx.lineTo(r*0.82,0); ctx.lineTo(0,r*0.94); ctx.lineTo(-r*0.82,0);
+      ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+    case 5:
+      ctx.beginPath();
+      for(let i=0;i<10;i++){
+        const a=-Math.PI/2+i*Math.PI/5, rad=i%2?r*0.44:r*0.98;
+        const X=Math.cos(a)*rad, Y=Math.sin(a)*rad;
+        i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+  }
+  ctx.fillStyle="rgba(255,255,255,.45)";
+  ctx.beginPath(); ctx.ellipse(-r*0.22,-r*0.30,r*0.16,r*0.09,-0.5,0,7); ctx.fill();
+  ctx.restore();
+}
+
+/* ==================== 背景 ==================== */
+function drawBackground(){
+  const gy=CFG.gridY;
+  const sky=ctx.createLinearGradient(0,CFG.hudH,0,gy);
+  sky.addColorStop(0,"#7fb6e8"); sky.addColorStop(0.6,"#a9d2f2"); sky.addColorStop(1,"#cfe6fa");
+  ctx.fillStyle=sky; ctx.fillRect(0,CFG.hudH,CFG.W,gy-CFG.hudH);
+  // 云
+  ctx.fillStyle="rgba(255,255,255,.6)";
+  for(let i=0;i<3;i++){
+    const cx=76+i*196, cy=118+((i*37)%34), s=0.8+0.2*hash(i);
+    ctx.beginPath();
+    ctx.ellipse(cx,cy,32*s,16*s,0,0,7);
+    ctx.ellipse(cx-21*s,cy+5*s,19*s,11*s,0,0,7);
+    ctx.ellipse(cx+23*s,cy+4*s,22*s,12*s,0,0,7);
+    ctx.fill();
+  }
+  // 城堡砖墙
+  const bw=ctx.createLinearGradient(0,150,0,gy);
+  bw.addColorStop(0,"#98abd2"); bw.addColorStop(1,"#7d8fb9");
+  ctx.fillStyle=bw; ctx.fillRect(0,150,CFG.W,gy-150);
+  ctx.strokeStyle="rgba(255,255,255,.32)"; ctx.lineWidth=1.5;
+  for(let y=150;y<gy;y+=26){
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(CFG.W,y); ctx.stroke();
+    for(let x=((y/26|0)%2?-30:0);x<CFG.W;x+=60){ ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,y+26); ctx.stroke(); }
+  }
+  // 地面条
+  const fl=ctx.createLinearGradient(0,gy-8,0,gy+6);
+  fl.addColorStop(0,"#8b9a72"); fl.addColorStop(1,"#5d6a4c");
+  ctx.fillStyle=fl; ctx.fillRect(0,gy-8,CFG.W,14);
+  ctx.fillStyle="rgba(255,255,255,.28)"; ctx.fillRect(0,gy-8,CFG.W,3);
+  // 棋盘下方：排石通道 + 地面（填补棋盘底到道具栏之间的空间）
+  {
+    const bBot=boardBot(), cx0=CFG.gridX-9, cw=CFG.cols*CFG.cell+18;
+    const cg=ctx.createLinearGradient(0,bBot,0,CFG.H);
+    cg.addColorStop(0,"#5b4a2e"); cg.addColorStop(0.45,"#4a3d26"); cg.addColorStop(1,"#3a3020");
+    ctx.fillStyle=cg; ctx.fillRect(0,bBot,CFG.W,CFG.H-bBot);
+    // 排石口：石堆正下方的开口
+    ctx.fillStyle="#241d12"; ctx.fillRect(cx0,bBot+6,cw,26);
+    ctx.fillStyle="rgba(0,0,0,.45)"; ctx.fillRect(cx0,bBot+6,cw,5);
+    ctx.strokeStyle="rgba(255,255,255,.12)"; ctx.lineWidth=2;
+    ctx.strokeRect(cx0,bBot+6,cw,26);
+    // 通道两侧的石砌
+    ctx.fillStyle="#6b5a3a";
+    ctx.fillRect(0,bBot+6,cx0,26); ctx.fillRect(cx0+cw,bBot+6,CFG.W-(cx0+cw),26);
+    // 地面压条
+    ctx.fillStyle="#6d7c5a"; ctx.fillRect(0,bBot+32,CFG.W,6);
+    ctx.fillStyle="rgba(255,255,255,.18)"; ctx.fillRect(0,bBot+32,CFG.W,2);
+  }
+}
+// 右侧矿洞（石堆所在区域：有洞顶 + 岩壁，石堆不悬空）
+function drawCave(){
+  const x0=shieldRight()-6, x1=CFG.W, top=CFG.beamY+CFG.beamH-4, gy=CFG.gridY;
+  const g=ctx.createLinearGradient(0,top,0,gy);
+  g.addColorStop(0,"#2c2a3c"); g.addColorStop(0.5,"#3a3550"); g.addColorStop(1,"#463d58");
+  ctx.fillStyle=g; ctx.fillRect(x0,top,x1-x0,gy-top);
+  // 岩壁纹理
+  ctx.strokeStyle="rgba(255,255,255,.05)"; ctx.lineWidth=1;
+  for(let i=0;i<26;i++){
+    const yy=top+10+hash(i*3)*  (gy-top-20);
+    ctx.beginPath(); ctx.moveTo(x0+hash(i*7)*(x1-x0), yy);
+    ctx.lineTo(x0+hash(i*11)*(x1-x0), yy+6+hash(i*13)*10); ctx.stroke();
+  }
+  // 洞顶岩层
+  const cg=ctx.createLinearGradient(0,top-14,0,top+16);
+  cg.addColorStop(0,"#6b5f86"); cg.addColorStop(1,"#3a3550");
+  ctx.fillStyle=cg; ctx.fillRect(x0,top-14,x1-x0,30);
+  ctx.fillStyle="rgba(0,0,0,.28)"; ctx.fillRect(x0,top+14,x1-x0,4);
+  for(let i=0;i<7;i++){
+    const bx=x0+12+i*((x1-x0-20)/7);
+    ctx.fillStyle="rgba(255,255,255,.06)";
+    ctx.beginPath(); ctx.ellipse(bx,top+2,16,7,0,0,7); ctx.fill();
+  }
+}
+// 头顶木板（顶）
+function drawBeam(){
+  const x0=12, x1=tx(CFG.rockCol0)+8, y=CFG.beamY, h=CFG.beamH;
+  // 斜撑（撑在尖刺墙上）
+  ctx.strokeStyle="#6f451f"; ctx.lineWidth=9; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(x0+26,y+h); ctx.lineTo(x0+26,y+h+34); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x1-30,y+h); ctx.lineTo(x1-30,y+h+30); ctx.stroke();
+  ctx.lineCap="butt";
+  const g=ctx.createLinearGradient(0,y,0,y+h);
+  g.addColorStop(0,"#c8924e"); g.addColorStop(0.35,"#a06c34"); g.addColorStop(1,"#6b411c");
+  ctx.fillStyle=g; rr(x0,y,x1-x0,h,6); ctx.fill();
+  ctx.strokeStyle="#4a2c12"; ctx.lineWidth=2.5; ctx.stroke();
+  // 木纹
+  ctx.strokeStyle="rgba(255,255,255,.13)"; ctx.lineWidth=1.6;
+  for(let i=0;i<4;i++){
+    const yy=y+5+i*6;
+    ctx.beginPath(); ctx.moveTo(x0+8,yy);
+    ctx.bezierCurveTo(x0+((x1-x0)*0.35),yy-2.5, x0+((x1-x0)*0.7),yy+2.5, x1-10,yy);
+    ctx.stroke();
+  }
+  // 铁螺栓
+  for(const bx of [x0+18, (x0+x1)/2, x1-22]){
+    ctx.fillStyle="#8b93a8"; ctx.beginPath(); ctx.arc(bx,y+h/2,4.6,0,7); ctx.fill();
+    ctx.strokeStyle="#3d4457"; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.fillStyle="rgba(255,255,255,.45)"; ctx.beginPath(); ctx.arc(bx-1.5,y+h/2-1.5,1.7,0,7); ctx.fill();
+  }
+  // 底沿阴影（被顶住的压力）
+  ctx.fillStyle="rgba(0,0,0,.26)"; ctx.fillRect(x0,y+h-4,x1-x0,4);
+  // 顶板被压弯的裂纹（体力越低越明显）
+  const st=clamp(G.stamina/CFG.staminaMax,0,1);
+  if(st<0.7){
+    ctx.strokeStyle="rgba(50,28,8,"+(0.5*(1-st))+")"; ctx.lineWidth=1.4;
+    for(let i=0;i<3;i++){
+      const bx=x0+50+i*80;
+      ctx.beginPath(); ctx.moveTo(bx,y+3); ctx.lineTo(bx+6*(i%2?-1:1),y+h-3); ctx.stroke();
+    }
+  }
+}
+function drawSpikes(){
+  const wx=CFG.spikeWallX, ww=CFG.spikeWallW, tip=CFG.spikeTipX;
+  const top=CFG.spikeTop, bot=CFG.gridY;
+  const wg=ctx.createLinearGradient(wx,0,wx+ww,0);
+  wg.addColorStop(0,"#57668c"); wg.addColorStop(1,"#8393b6");
+  ctx.fillStyle=wg; ctx.fillRect(wx,top,ww,bot-top);
+  ctx.strokeStyle="rgba(255,255,255,.28)"; ctx.lineWidth=1.5;
+  for(let y=top;y<bot;y+=24){ ctx.beginPath(); ctx.moveTo(wx,y); ctx.lineTo(wx+ww,y); ctx.stroke(); }
+  for(let k=0;k<7;k++){
+    const y=top+12+k*24, off=(k%2)?ww/2:0;
+    ctx.beginPath(); ctx.moveTo(wx+off,y); ctx.lineTo(wx+ww,y); ctx.stroke();
+  }
+  ctx.fillStyle="#46547a"; ctx.fillRect(wx,top,ww,7);
+  ctx.fillStyle="rgba(255,255,255,.25)"; ctx.fillRect(wx,top,ww,3);
+  // 尖刺（4 根，朝右）
+  for(let i=0;i<4;i++){
+    const y=top+34+i*58;
+    const grd=ctx.createLinearGradient(wx+ww,y-19,tip,y);
+    grd.addColorStop(0,"#98a4b9"); grd.addColorStop(1,"#f4f8ff");
+    ctx.fillStyle=grd; ctx.beginPath();
+    ctx.moveTo(wx+ww,y-20); ctx.lineTo(tip,y); ctx.lineTo(wx+ww,y+20); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle="#48526e"; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle="rgba(255,255,255,.5)"; ctx.beginPath();
+    ctx.moveTo(wx+ww,y-15); ctx.lineTo(tip+9,y-2); ctx.lineTo(wx+ww,y-3); ctx.closePath(); ctx.fill();
+  }
+}
+
+/* ==================== 国王（放大，与尖刺等高） ==================== */
+function drawKingBody(st){
+  const breathe = Math.sin(G.t*2.2)*1.2;
+  // 地面投影
+  ctx.fillStyle="rgba(28,36,18,.32)";
+  ctx.beginPath(); ctx.ellipse(2,2,27,7.5,0,0,7); ctx.fill();
+  // 披风
+  const cw=Math.sin(G.t*1.6)*3;
+  ctx.fillStyle="#c0392f";
+  ctx.beginPath(); ctx.moveTo(-7,-54);
+  ctx.quadraticCurveTo(-35,-40+cw,-28,-6);
+  ctx.quadraticCurveTo(-15,-12+cw*0.5,-9,-14);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#e05a4a";
+  ctx.beginPath(); ctx.moveTo(-7,-54);
+  ctx.quadraticCurveTo(-22,-38+cw,-19,-10);
+  ctx.quadraticCurveTo(-12,-14,-9,-14);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#8e2b22"; ctx.lineWidth=1.5; ctx.stroke();
+  // 腿 + 靴
+  const ls=3+(1-st)*3;
+  ctx.strokeStyle="#4a5878"; ctx.lineWidth=8; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(-4,-26); ctx.lineTo(-9-ls,-4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( 4,-26); ctx.lineTo( 9+ls,-4); ctx.stroke();
+  ctx.fillStyle="#2f3a55";
+  ctx.beginPath(); rr(-17-ls,-8,16,9,3); ctx.fill();
+  ctx.beginPath(); rr( 3+ls,-8,16,9,3); ctx.fill();
+  // 锁子甲下摆
+  ctx.fillStyle="#6d7c9c";
+  ctx.beginPath(); ctx.moveTo(-13,-30); ctx.lineTo(13,-30); ctx.lineTo(11,-16); ctx.lineTo(-11,-16);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#3d4a68"; ctx.lineWidth=1.2; ctx.stroke();
+  // 胸甲
+  const bt=-52+breathe*0.3;
+  const g2=ctx.createLinearGradient(-15,bt,15,bt+34);
+  g2.addColorStop(0,"#d8e4f4"); g2.addColorStop(0.4,"#a3b6d2"); g2.addColorStop(1,"#6e83a5");
+  ctx.fillStyle=g2;
+  ctx.beginPath();
+  ctx.moveTo(-15,bt+6); ctx.quadraticCurveTo(-16,bt,0,bt-1);
+  ctx.quadraticCurveTo(16,bt,15,bt+6);
+  ctx.lineTo(13,bt+30); ctx.quadraticCurveTo(0,bt+36,-13,bt+30);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#3d4a68"; ctx.lineWidth=1.8; ctx.stroke();
+  const rg=ctx.createLinearGradient(0,bt,0,bt+32);
+  rg.addColorStop(0,"rgba(255,255,255,.55)"); rg.addColorStop(1,"rgba(255,255,255,0)");
+  ctx.fillStyle=rg;
+  ctx.beginPath(); ctx.moveTo(-3,bt+2); ctx.lineTo(3,bt+2); ctx.lineTo(2,bt+31); ctx.lineTo(-2,bt+31); ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#ffd75e"; ctx.beginPath(); rr(-13,bt+24,26,5,2); ctx.fill();
+  ctx.strokeStyle="#c9a12e"; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle="#fff3c4"; ctx.beginPath(); rr(-3,bt+24,6,5,2); ctx.fill();
+  // 肩甲
+  for(const sx of [-1,1]){
+    ctx.save(); ctx.translate(sx*15,bt+7); ctx.rotate(sx*0.16);
+    const sg=ctx.createLinearGradient(0,-9,0,9);
+    sg.addColorStop(0,"#eaf1fb"); sg.addColorStop(1,"#8fa3c2");
+    ctx.fillStyle=sg; ctx.beginPath(); ctx.ellipse(0,0,9,8,0,0,7); ctx.fill();
+    ctx.strokeStyle="#3d4a68"; ctx.lineWidth=1.4; ctx.stroke();
+    ctx.strokeStyle="rgba(255,215,94,.9)"; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.ellipse(0,0,6.8,5.8,0,0,7); ctx.stroke();
+    ctx.restore();
+  }
+  // 撑住盾牌的手臂（伸向右）
+  const as=(1-st)*2.2;
+  ctx.strokeStyle="#a3b6d2"; ctx.lineWidth=7.5; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(9,bt+10); ctx.quadraticCurveTo(16,bt+14+as,26,bt+16+as); ctx.stroke();
+  ctx.strokeStyle="#3d4a68"; ctx.lineWidth=1.4; ctx.stroke();
+  // 另一只手也撑住（顶住木板）
+  ctx.strokeStyle="#a3b6d2"; ctx.lineWidth=7;
+  ctx.beginPath(); ctx.moveTo(-9,bt+8); ctx.quadraticCurveTo(-16,bt+2,-14,bt-14); ctx.stroke();
+  ctx.strokeStyle="#3d4a68"; ctx.lineWidth=1.3; ctx.stroke();
+  ctx.fillStyle="#f2c9a0"; ctx.beginPath(); ctx.arc(-14,bt-16,4.2,0,7); ctx.fill();
+  ctx.strokeStyle="#c89055"; ctx.lineWidth=1.2; ctx.stroke();
+  // 头
+  const hy=bt-14+breathe*0.4;
+  ctx.fillStyle="#f2c9a0"; ctx.fillRect(-4,hy+8,8,5);
+  const face=ctx.createLinearGradient(-11,hy-11,11,hy+13);
+  face.addColorStop(0,"#ffe0bd"); face.addColorStop(1,"#e8b483");
+  ctx.fillStyle=face; ctx.beginPath(); ctx.ellipse(0,hy,11.5,13,0,0,7); ctx.fill();
+  ctx.strokeStyle="#c89055"; ctx.lineWidth=1.2; ctx.stroke();
+  ctx.fillStyle="#2b2438";
+  const eh= st<0.62 ? 1.1 : 2.4;
+  ctx.beginPath(); ctx.ellipse(4.4,hy-2,2.1,eh,0,0,7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-3.6,hy-2,1.9,eh,0,0,7); ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,.9)";
+  ctx.beginPath(); ctx.arc(5.0,hy-3.1,0.7,0,7); ctx.fill();
+  ctx.beginPath(); ctx.arc(-3.0,hy-3.1,0.6,0,7); ctx.fill();
+  ctx.fillStyle="rgba(255,140,130,.35)";
+  ctx.beginPath(); ctx.ellipse(-7,hy+3,2.6,1.8,0,0,7); ctx.fill();
+  ctx.strokeStyle="#8a6a4f"; ctx.lineWidth=1.9; ctx.lineCap="round";
+  const bw2= st<0.62 ? -0.35 : -0.18;
+  ctx.beginPath(); ctx.moveTo(1.8,hy-6.5); ctx.lineTo(6.6,hy-6.5+bw2*4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-5.8,hy-6.5+bw2*4); ctx.lineTo(-1.2,hy-6.5); ctx.stroke();
+  ctx.strokeStyle="#d19a63"; ctx.lineWidth=1.4;
+  ctx.beginPath(); ctx.moveTo(0.6,hy-1); ctx.lineTo(0.6,hy+3); ctx.lineTo(2.5,hy+3.8); ctx.stroke();
+  ctx.fillStyle="#e3d3b0";
+  ctx.beginPath();
+  ctx.moveTo(-8,hy+3.5); ctx.quadraticCurveTo(-8.5,hy+15,0,hy+16.5);
+  ctx.quadraticCurveTo(8.5,hy+15,8,hy+3.5);
+  ctx.quadraticCurveTo(4,hy+7.5,0,hy+7);
+  ctx.quadraticCurveTo(-4,hy+7.5,-8,hy+3.5);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#bda88a"; ctx.lineWidth=1; ctx.stroke();
+  if(st<0.68){ ctx.fillStyle="#8a4040"; ctx.beginPath(); ctx.ellipse(0.4,hy+6,2.6,1.9,0,0,7); ctx.fill(); }
+  // 头盔
+  const hm=ctx.createLinearGradient(-12,hy-17,12,hy-2);
+  hm.addColorStop(0,"#f0f6ff"); hm.addColorStop(0.5,"#b0c2dc"); hm.addColorStop(1,"#7a8dad");
+  ctx.fillStyle=hm;
+  ctx.beginPath(); ctx.moveTo(-11.5,hy-3);
+  ctx.quadraticCurveTo(-12,hy-16,0,hy-16.5);
+  ctx.quadraticCurveTo(12,hy-16,11.5,hy-3);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#3d4a68"; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.fillStyle="rgba(255,255,255,.55)";
+  ctx.beginPath(); ctx.ellipse(-4.5,hy-11,3,4.5,0.4,0,7); ctx.fill();
+  ctx.fillStyle="#ffd75e";
+  ctx.beginPath(); ctx.moveTo(0,hy-27); ctx.lineTo(-4.5,hy-15); ctx.lineTo(4.5,hy-15); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#c9a12e"; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle="#ffd75e";
+  ctx.beginPath();
+  ctx.moveTo(-12,hy-8); ctx.lineTo(-12,hy-14); ctx.lineTo(-7.5,hy-10);
+  ctx.lineTo(-3.5,hy-16); ctx.lineTo(0,hy-10); ctx.lineTo(3.5,hy-16);
+  ctx.lineTo(7.5,hy-10); ctx.lineTo(12,hy-14); ctx.lineTo(12,hy-8);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#c9a12e"; ctx.lineWidth=1.3; ctx.stroke();
+  ctx.fillStyle="#ff5a6a"; ctx.beginPath(); ctx.arc(0,hy-11.5,2.1,0,7); ctx.fill();
+  ctx.fillStyle="#48b6ff";
+  ctx.beginPath(); ctx.arc(-7.5,hy-12,1.4,0,7); ctx.fill();
+  ctx.beginPath(); ctx.arc(7.5,hy-12,1.4,0,7); ctx.fill();
+  ctx.fillStyle="#c8d6e8";
+  ctx.beginPath(); ctx.moveTo(-1.8,hy-8); ctx.lineTo(1.8,hy-8); ctx.lineTo(1.3,hy-1); ctx.lineTo(-1.3,hy-1); ctx.closePath(); ctx.fill();
+  ctx.lineCap="butt";
+  // 汗
+  if(st<0.65 && G.state==="playing"){
+    for(let i=0;i<2;i++){
+      const ph=((G.t*0.9)+i*0.5)%1;
+      ctx.fillStyle="rgba(120,200,255,.9)";
+      ctx.beginPath(); ctx.ellipse(-14+i*3, hy-4+ph*14, 2.0, 3.2, 0, 0, 7); ctx.fill();
+    }
+  }
+}
+function drawKing(){
+  const st=clamp(G.stamina/CFG.staminaMax,0,1);
+  const push=G.push||0;
+  const kx=CFG.kingX-push, ky=CFG.gridY;
+  const lean=(1-st)*0.18;
+  const shake=G.state==="playing" ? (1-st)*Math.sin(G.t*26)*2.2 : 0;
+  ctx.save();
+  ctx.translate(kx+shake, ky);
+  ctx.scale(CFG.kingScale, CFG.kingScale);
+  ctx.rotate(-lean);
+  drawKingBody(st);
+  ctx.restore();
+}
+// 盾牌：从木板（顶）一直挡到地面
+function drawShield(){
+  const st=clamp(G.stamina/CFG.staminaMax,0,1);
+  const push=G.push||0;
+  const dh=(1-st)*Math.sin(G.t*30)*3.5;
+  const x0=CFG.shieldX0-push+dh, x1=CFG.shieldX1-push+dh;
+  const y0=CFG.beamY+CFG.beamH-2, y1=CFG.gridY+2;
+  const w=x1-x0, h=y1-y0;
+  ctx.save();
+  // 盾后阴影
+  ctx.fillStyle="rgba(0,0,0,.22)"; rr(x0-3,y0,w+6,h,10); ctx.fill();
+  const g=ctx.createLinearGradient(x0,y0,x1,y1);
+  g.addColorStop(0,"#ff8a70"); g.addColorStop(0.45,"#e04a35"); g.addColorStop(1,"#a8331f");
+  ctx.fillStyle=g;
+  // 塔盾轮廓：上宽下略收，底部平贴地面
+  ctx.beginPath();
+  ctx.moveTo(x0,y0+8); ctx.quadraticCurveTo(x0,y0,x0+10,y0);
+  ctx.lineTo(x1-10,y0); ctx.quadraticCurveTo(x1,y0,x1,y0+8);
+  ctx.lineTo(x1,y1-30); ctx.quadraticCurveTo(x1,y1,x1-14,y1);
+  ctx.lineTo(x0+14,y1); ctx.quadraticCurveTo(x0,y1,x0,y1-30);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#ffd75e"; ctx.lineWidth=4; ctx.stroke();
+  // 内圈包边
+  ctx.strokeStyle="rgba(255,255,255,.32)"; ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(x0+7,y0+11); ctx.lineTo(x1-7,y0+11);
+  ctx.lineTo(x1-7,y1-30); ctx.quadraticCurveTo(x1-7,y1-7,x1-22,y1-7);
+  ctx.lineTo(x0+22,y1-7); ctx.quadraticCurveTo(x0+7,y1-7,x0+7,y1-30);
+  ctx.closePath(); ctx.stroke();
+  // 十字纹章（上下贯通，呼应"顶到地"）
+  const mx=(x0+x1)/2;
+  ctx.strokeStyle="rgba(255,255,255,.92)"; ctx.lineWidth=7; ctx.lineCap="butt";
+  ctx.beginPath(); ctx.moveTo(mx,y0+18); ctx.lineTo(mx,y1-18); ctx.stroke();
+  ctx.lineWidth=6;
+  ctx.beginPath(); ctx.moveTo(x0+12,(y0+y1)/2); ctx.lineTo(x1-12,(y0+y1)/2); ctx.stroke();
+  // 中央圆徽
+  ctx.fillStyle="rgba(255,215,94,.95)";
+  ctx.beginPath(); ctx.arc(mx,(y0+y1)/2,11,0,7); ctx.fill();
+  ctx.strokeStyle="#8e2b22"; ctx.lineWidth=2.5; ctx.stroke();
+  // 高光
+  ctx.fillStyle="rgba(255,255,255,.16)";
+  ctx.beginPath(); ctx.ellipse(x0+11,y0+40,8,h*0.30,0,0,7); ctx.fill();
+  // 顶部与木板接触的压力纹（体力低时出现）
+  if(st<0.7){
+    ctx.strokeStyle="rgba(255,255,255,"+(0.35*(1-st))+")"; ctx.lineWidth=2;
+    for(let i=0;i<3;i++){
+      const px=x0+14+i*(w-28)/2;
+      ctx.beginPath(); ctx.moveTo(px,y0+4); ctx.lineTo(px+3,y0+16); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/* ==================== 棋盘 ==================== */
+function drawSupportMarks(){
+  const gy=CFG.gridY, gh=CFG.groundRows*CFG.cell;
+  for(let c=CFG.rockCol0;c<CFG.cols;c++){
+    const x=tx(c), pulse=0.5+0.5*Math.sin(G.t*3+c);
+    // 通道列：柔和的暖色底光（实线细框，不用虚线）
+    ctx.fillStyle="rgba(255,215,94,"+(0.09+0.07*pulse)+")";
+    ctx.fillRect(x+2,gy+2,CFG.cell-4,gh-4);
+    if(colOpen(c)){
+      ctx.fillStyle="rgba(90,230,150,.16)";
+      ctx.fillRect(x+3,gy+3,CFG.cell-6,gh-6);
+      ctx.strokeStyle="rgba(120,240,175,.55)"; ctx.lineWidth=2;
+      ctx.strokeRect(x+3.5,gy+3.5,CFG.cell-7,gh-7);
+    }
+  }
+}
+function drawBoard(){
+  const gy=CFG.gridY, bBot=boardBot();
+  ctx.save();
+  // 棋盘底板（含石堆所在的积石区）
+  ctx.fillStyle="#3d4a6b";
+  rr(CFG.gridX-9,boardTop()-9,CFG.cols*CFG.cell+18,bBot-boardTop()+18,14); ctx.fill();
+  ctx.strokeStyle="#223055"; ctx.lineWidth=3; ctx.stroke();
+  ctx.strokeStyle="rgba(255,255,255,.18)"; ctx.lineWidth=1.5;
+  rr(CFG.gridX-6,boardTop()-6,CFG.cols*CFG.cell+12,bBot-boardTop()+12,12); ctx.stroke();
+  ctx.fillStyle="rgba(15,20,40,.34)";
+  rr(CFG.gridX-4,gy-4,CFG.cols*CFG.cell+8,CFG.groundRows*CFG.cell+8,10); ctx.fill();
+
+  ctx.save();
+  rr(CFG.gridX-6,boardTop()-6,CFG.cols*CFG.cell+12,bBot-boardTop()+12,10); ctx.clip();
+  // 空洞
+  for(let ri=CFG.rockRows; ri<TOTAL; ri++) for(let c=0;c<CFG.cols;c++){
+    if(board[ri][c]) continue;
+    const x=tx(c), y=ty(ri);
+    ctx.fillStyle="rgba(10,14,30,.42)";
+    rr(x+3,y+3,CFG.cell-6,CFG.cell-6,10); ctx.fill();
+    ctx.strokeStyle="rgba(255,255,255,.10)"; ctx.lineWidth=1;
+    rr(x+3.5,y+3.5,CFG.cell-7,CFG.cell-7,10); ctx.stroke();
+  }
+  ctx.strokeStyle="rgba(255,255,255,.08)"; ctx.lineWidth=1;
+  for(let ri=0; ri<=TOTAL; ri++){
+    ctx.beginPath(); ctx.moveTo(CFG.gridX, ty(ri)); ctx.lineTo(CFG.gridX+CFG.cols*CFG.cell, ty(ri)); ctx.stroke();
+  }
+  for(let c=0;c<=CFG.cols;c++){
+    ctx.beginPath(); ctx.moveTo(tx(c), boardTop()); ctx.lineTo(tx(c), bBot); ctx.stroke();
+  }
+  drawSupportMarks();
+
+  // 方块
+  for(let ri=0; ri<TOTAL; ri++) for(let c=0;c<CFG.cols;c++){
+    const x=board[ri][c]; if(!x || x.kind!=="block") continue;
+    const pad=4, s=CFG.cell-pad*2;
+    let sc=1, alpha=1;
+    if(x.dying){ const k=clamp(G.phT/CFG.clearDur,0,1); sc=1+k*0.35-k*k*1.35; alpha=clamp(1-k*1.1,0,1); }
+    if(G.sel && G.sel.r===ri && G.sel.c===c) sc*=1.08;
+    const cx=x.px+CFG.cell/2, cy=x.py+CFG.cell/2;
+    ctx.save(); ctx.globalAlpha=alpha;
+    ctx.translate(cx,cy); ctx.scale(sc,sc); ctx.translate(-cx,-cy);
+    const grd=ctx.createLinearGradient(x.px+pad,x.py+pad,x.px+pad,x.py+pad+s);
+    grd.addColorStop(0,"#fbfaff"); grd.addColorStop(1,"#d3d0e4");
+    ctx.fillStyle=grd; rr(x.px+pad,x.py+pad,s,s,12); ctx.fill();
+    ctx.strokeStyle="#a9a4c2"; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle="rgba(255,255,255,.7)"; rr(x.px+pad+6,x.py+pad+5,s-12,s*0.26,7); ctx.fill();
+    drawIcon(x.color, cx, cy+1, s*0.30);
+    if(isSupportCol(c)){
+      ctx.fillStyle="rgba(255,215,94,.95)"; rr(x.px+pad+3,x.py+pad+s-7,s-6,5,3); ctx.fill();
+      ctx.strokeStyle="rgba(255,215,94,.9)"; ctx.lineWidth=2;
+      rr(x.px+pad+2,x.py+pad+2,s-4,s-4,10); ctx.stroke();
+    }
+    if(G.sel && G.sel.r===ri && G.sel.c===c){
+      const p2=0.6+0.4*Math.sin(G.t*9);
+      ctx.strokeStyle="rgba(255,255,255,"+p2+")"; ctx.lineWidth=3.5;
+      rr(x.px+pad-3,x.py+pad-3,s+6,s+6,13); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  for(const f of G.fx){
+    const k=1-f.t/f.life;
+    ctx.save(); ctx.globalAlpha=clamp(k,0,1);
+    ctx.translate(f.x,f.y); ctx.scale(k*1.15,k*1.15);
+    ctx.fillStyle=ICON_COLS[f.color]||"#ffd23f";
+    rr(-CFG.cell/2+5,-CFG.cell/2+5,CFG.cell-10,CFG.cell-10,12); ctx.fill();
+    ctx.restore();
+  }
+  for(const p of G.parts){
+    ctx.globalAlpha=clamp(1-p.t/p.life,0,1);
+    ctx.fillStyle=ICON_COLS[p.color]||"#ffd23f";
+    ctx.fillRect(p.x-p.s/2,p.y-p.s/2,p.s,p.s);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+  ctx.restore();
+
+}
+// 矿石：自由石堆（画在方块之上）
+function drawStones(){
+  ctx.save();
+  rr(shieldRight()-26, CFG.beamY+CFG.beamH, CFG.W-shieldRight()+26, boardBot()-CFG.beamY-CFG.beamH+30, 10);
+  ctx.clip();
+  // 先铺石缝阴影（缝隙变成暗部，不再露出洞壁），再画石头本体
+  for(const p of G.stones) drawStoneAO(p);
+  const sorted=G.stones.slice().sort((a,b)=>a.y-b.y);   // 下面的画在上面 → 堆叠遮挡自然
+  for(const p of sorted) drawStone(p);
+  ctx.restore();
+}
+
+/* ==================== HUD / 道具 ==================== */
+const BTN = { x: CFG.W-72, y: 14, w: 58, h: 34 };
+const inBtn=(x,y)=> x>=BTN.x&&x<=BTN.x+BTN.w&&y>=BTN.y&&y<=BTN.y+BTN.h;
+const ITEMS = [
+  { key:"clear", x:26,  y:CFG.itemTop, w:236, h:64, label:"消除", sub:"炸开一组" },
+  { key:"time",  x:278, y:CFG.itemTop, w:236, h:64, label:"加时", sub:"+20 秒" },
+];
+const inItem=(x,y)=> ITEMS.find(b=> x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h);
+function drawMenuBtn(){
+  ctx.save();
+  rr(BTN.x,BTN.y,BTN.w,BTN.h,12);
+  ctx.fillStyle="rgba(35,50,90,.82)"; ctx.fill();
+  ctx.strokeStyle="rgba(255,255,255,.35)"; ctx.lineWidth=1.6; ctx.stroke();
+  ctx.fillStyle="#ffffff";
+  ctx.fillRect(BTN.x+15,BTN.y+10,4.5,14); ctx.fillRect(BTN.x+24,BTN.y+10,4.5,14);
+  ctx.font="13px sans-serif"; ctx.textAlign="left"; ctx.textBaseline="middle";
+  ctx.fillText("菜单",BTN.x+35,BTN.y+BTN.h/2+1);
+  ctx.restore();
+}
+function drawHUD(){
+  const H=CFG.hudH;
+  const hg=ctx.createLinearGradient(0,0,0,H);
+  hg.addColorStop(0,"#33406b"); hg.addColorStop(1,"#243057");
+  ctx.fillStyle=hg; ctx.fillRect(0,0,CFG.W,H);
+  ctx.strokeStyle="rgba(255,255,255,.18)"; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(CFG.W,H); ctx.stroke();
+  ctx.textBaseline="middle";
+  rr(16,16,86,32,16); ctx.fillStyle="#ffd75e"; ctx.fill();
+  ctx.fillStyle="#2b2410"; ctx.font="bold 15px sans-serif"; ctx.textAlign="center";
+  ctx.fillText("第 1 关",59,32);
+  const tl=Math.max(0,G.timeLeft);
+  const mm=String(Math.floor(tl/60)).padStart(2,"0");
+  const ss=String(Math.floor(tl%60)).padStart(2,"0");
+  const urgent=tl<=10;
+  ctx.save(); ctx.translate(CFG.W/2-20,36);
+  const pulse=urgent?1+0.06*Math.sin(G.t*12):1; ctx.scale(pulse,pulse);
+  ctx.font="bold 30px sans-serif"; ctx.textAlign="center";
+  ctx.fillStyle= urgent?"#ff6b6b":"#ffffff";
+  ctx.fillText(mm+":"+ss,0,0); ctx.restore();
+  ctx.font="11px sans-serif"; ctx.fillStyle="rgba(255,255,255,.6)";
+  ctx.fillText("剩余时间",CFG.W/2-20,58);
+  drawMenuBtn();
+  const by=70, bw=CFG.W-32;
+  rr(16,by,bw,20,10); ctx.fillStyle="rgba(255,255,255,.14)"; ctx.fill();
+  const prog=clamp(G.stonesGone/Math.max(1,G.stonesTotal),0,1);
+  if(prog>0){
+    const pg=ctx.createLinearGradient(16,0,16+bw,0);
+    pg.addColorStop(0,"#ffd23f"); pg.addColorStop(1,"#ff9c3a");
+    rr(16,by,Math.max(8,bw*prog),20,10); ctx.fillStyle=pg; ctx.fill();
+  }
+  ctx.strokeStyle="rgba(255,255,255,.25)"; ctx.lineWidth=1; rr(16,by,bw,20,10); ctx.stroke();
+  ctx.textAlign="left"; ctx.font="bold 12px sans-serif"; ctx.fillStyle="#1d2440";
+  ctx.fillText("漏掉石块 "+G.stonesGone+" / "+G.stonesTotal,26,by+10);
+  ctx.textAlign="right"; ctx.fillStyle="#2b2410";
+  ctx.fillText("支撑柱剩 "+supportBlocksLeft(),CFG.W-26,by+10);
+}
+function drawItems(){
+  ctx.save();
+  const g=ctx.createLinearGradient(0,CFG.itemTop-14,0,CFG.H);
+  g.addColorStop(0,"rgba(36,48,87,0)"); g.addColorStop(0.35,"#243057"); g.addColorStop(1,"#1b2547");
+  ctx.fillStyle=g; ctx.fillRect(0,CFG.itemTop-14,CFG.W,CFG.H-CFG.itemTop+14);
+  for(const b of ITEMS){
+    const n=G.items[b.key];
+    const on = n>0 && G.state==="playing";
+    const pop = (G.itemFx>0 && !on) ? 0 : 1;
+    ctx.save();
+    ctx.translate(b.x+b.w/2, b.y+b.h/2); ctx.scale(pop,pop); ctx.translate(-b.w/2,-b.h/2);
+    const bg=ctx.createLinearGradient(0,0,0,b.h);
+    if(on){ bg.addColorStop(0, b.key==="clear"?"#ff9c3a":"#48b6ff"); bg.addColorStop(1, b.key==="clear"?"#e5711a":"#1f86d8"); }
+    else { bg.addColorStop(0,"#4a5478"); bg.addColorStop(1,"#3a4364"); }
+    rr(0,0,b.w,b.h,14); ctx.fillStyle=bg; ctx.fill();
+    ctx.strokeStyle="rgba(255,255,255,.35)"; ctx.lineWidth=2; ctx.stroke();
+    rr(3,3,b.w-6,b.h*0.42,10); ctx.fillStyle="rgba(255,255,255,.20)"; ctx.fill();
+    const vx=16, vy=b.h/2;
+    rr(vx-1,vy-11,24,22,6); ctx.fillStyle="rgba(255,255,255,.22)"; ctx.fill();
+    ctx.strokeStyle="rgba(255,255,255,.7)"; ctx.lineWidth=1.6; ctx.stroke();
+    ctx.fillStyle= on?"#ffffff":"rgba(255,255,255,.45)";
+    ctx.beginPath(); ctx.moveTo(vx+6,vy-6); ctx.lineTo(vx+16,vy); ctx.lineTo(vx+6,vy+6); ctx.closePath(); ctx.fill();
+    ctx.textAlign="left"; ctx.textBaseline="middle";
+    ctx.fillStyle= on?"#ffffff":"rgba(255,255,255,.45)";
+    ctx.font="bold 19px sans-serif"; ctx.fillText(b.label,50,b.h/2-9);
+    ctx.font="12px sans-serif";
+    ctx.fillStyle= on?"rgba(255,255,255,.85)":"rgba(255,255,255,.4)";
+    ctx.fillText(b.sub,50,b.h/2+12);
+    ctx.textAlign="right"; ctx.font="bold 20px sans-serif";
+    ctx.fillStyle= on?"#ffd75e":"rgba(255,255,255,.35)";
+    ctx.fillText("×"+n,b.w-14,b.h/2);
+    if(!on){ ctx.fillStyle="rgba(10,14,30,.35)"; rr(0,0,b.w,b.h,14); ctx.fill(); }
+    ctx.restore();
+  }
+  if(G.combo>1 && G.comboT>0){
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.font="bold 15px sans-serif"; ctx.fillStyle="#ffd75e";
+    ctx.fillText("连击 ×"+G.combo+"　得分 "+G.score, CFG.W/2, CFG.itemTop-24);
+  }
+  ctx.restore();
+}
+
+/* ==================== 循环 ==================== */
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  update(dt); render();
+  requestAnimationFrame(frame);
+}
+function update(dt){
+  if(G.itemFx>0) G.itemFx=Math.max(0,G.itemFx-dt);
+  if(G.state==="playing"){
+    G.t+=dt;
+    G.timeLeft-=dt;
+    const load=pileLoad();
+    G.stamina -= CFG.staminaBase*(0.30+0.70*load)*dt;
+    updatePileRelief(dt);
+    if(G.comboT>0){ G.comboT-=dt; if(G.comboT<=0) G.combo=0; }
+    stepBoard(dt);
+    stepStones(dt);
+    if(G.stamina<=0 && G.state==="playing"){ G.stamina=0; lose("国王体力耗尽，被推进了尖刺……"); }
+    else if(G.timeLeft<=0 && G.state==="playing"){ G.timeLeft=0; lose("时间到！积石还没漏光"); }
+    if(stonesLeft()<=0 && G.state==="playing") win();
+  } else {
+    stepStones(dt);
+    if(G.state==="clear"||G.state==="over") G.endT+=dt;
+  }
+  // 垮落兜底
+  const thr=Math.max(1, Math.ceil(G.stonesTotal*CFG.collapseAt));
+  const supLeft=supportBlocksLeft();
+  if(!G.collapsing && !G.crush && supLeft>0 && supLeft<=CFG.collapseSupport){
+    // 支撑柱被打空到一定程度 → 积石失去依托，整体垮塌
+    G.collapsing=true; G.collapseT=0; G.crush=true;
+    G.shake=10; G.flash=0.35;
+    noise(0.6,0.26); tone(120,0.5,"sawtooth",0.12,-60);
+  }
+  if(!G.collapsing && stonesLeft()>0 && (stonesLeft()<=thr || blocksLeft()<=CFG.collapseBlocks)){
+    G.collapsing=true; G.collapseT=0;
+  }
+  if(G.collapsing && stonesLeft()>0){
+    G.collapseT+=dt;
+    if(G.collapseT>=0.18){ G.collapseT=0; forceCollapse(); }
+  }
+  const k=1-Math.exp(-17*dt);
+  for(let ri=0;ri<TOTAL;ri++) for(let c=0;c<CFG.cols;c++){
+    const x=board[ri][c]; if(!x||x.kind!=="block"||x.dying) continue;
+    x.px=lerp(x.px,tx(c),k); x.py=lerp(x.py,ty(ri),k);
+  }
+  for(let i=G.fx.length-1;i>=0;i--){ G.fx[i].t+=dt; if(G.fx[i].t>=G.fx[i].life) G.fx.splice(i,1); }
+  for(let i=G.parts.length-1;i>=0;i--){
+    const p=G.parts[i]; p.t+=dt; p.vy+=p.g*dt; p.x+=p.vx*dt; p.y+=p.vy*dt;
+    if(p.t>=p.life) G.parts.splice(i,1);
+  }
+  for(let c=0;c<CFG.cols;c++) if(G.pillar[c]>0) G.pillar[c]=Math.max(0,G.pillar[c]-dt);
+  if(G.flash>0) G.flash-=dt;
+  if(G.shake>0) G.shake=Math.max(0,G.shake-dt*18);
+  if((G.state==="clear"||G.state==="over") && G.endT>0.9 && !overlay.classList.contains("on")) showEnd();
+}
+function render(){
+  ctx.clearRect(0,0,CFG.W,CFG.H);
+  ctx.save();
+  if(G.shake>0.2) ctx.translate(rand(-G.shake,G.shake)*0.5, rand(-G.shake,G.shake)*0.5);
+  drawBackground();
+  drawCave();
+  drawBoard();
+  drawStones();
+  drawKing();
+  drawShield();
+  drawBeam();
+  drawSpikes();
+  ctx.restore();
+  drawHUD();
+  drawItems();
+  if(G.state==="ready"){
+    ctx.fillStyle="rgba(12,18,40,.80)"; ctx.fillRect(0,0,CFG.W,CFG.H);
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillStyle="#ffd75e"; ctx.font="bold 38px sans-serif";
+    ctx.fillText("拯 救 国 王",CFG.W/2,CFG.H/2-140);
+    ctx.fillStyle="#e8ecff"; ctx.font="17px sans-serif";
+    ctx.fillText("第一关 · 测试版",CFG.W/2,CFG.H/2-100);
+    ctx.fillStyle="#b9c4e8"; ctx.font="14px sans-serif";
+    ctx.fillText("交换相邻方块凑成三个同类，打通积石脚下的通道",CFG.W/2,CFG.H/2-62);
+    ctx.fillStyle="#8f9dc8"; ctx.font="13px sans-serif";
+    ctx.fillText("方块消掉不补、上方不落，原地留下空洞",CFG.W/2,CFG.H/2-36);
+    ctx.fillStyle="#8f9dc8"; ctx.font="13px sans-serif";
+    ctx.fillText("岩块像水一样从空洞里淌下去，漏光即获胜",CFG.W/2,CFG.H/2-14);
+    ctx.fillStyle="#ffd75e"; ctx.font="bold 20px sans-serif";
+    ctx.fillText("点击任意位置开始",CFG.W/2,CFG.H/2+40);
+  }
+  if(G.state==="paused"){ ctx.fillStyle="rgba(12,18,40,.55)"; ctx.fillRect(0,0,CFG.W,CFG.H); }
+}
+
+/* ==================== 交互 ==================== */
+function toCanvas(e){
+  const rect=cv.getBoundingClientRect();
+  return { x:(e.clientX-rect.left)*(CFG.W/rect.width), y:(e.clientY-rect.top)*(CFG.H/rect.height) };
+}
+function pick(x,y){
+  const c=Math.floor((x-CFG.gridX)/CFG.cell);
+  const ri=Math.floor((y-CFG.gridY)/CFG.cell)+CFG.rockRows;
+  if(c<0||c>=CFG.cols||ri<CFG.rockRows||ri>=TOTAL) return null;
+  if(!isBlock(ri,c)) return null;
+  return {r:ri,c};
+}
+function doSwap(a,b){
+  swapCells(a,b);
+  G.sa={r:a.r,c:a.c}; G.sb={r:b.r,c:b.c};
+  G.phase="swap"; G.phT=0;
+  tone(420,0.07,"sine",0.07,80);
+}
+function onDown(x,y){
+  if(inBtn(x,y)){ openMenu(); return; }
+  const it=inItem(x,y);
+  if(it){ if(it.key==="clear") useItemClear(); else useItemTime(); return; }
+  if(G.state!=="playing"||isBusy()) return;
+  const p=pick(x,y);
+  if(!p){ G.sel=null; return; }
+  if(!G.sel){ G.sel=p; tone(520,0.05,"sine",0.05); return; }
+  if(G.sel.r===p.r&&G.sel.c===p.c){ G.sel=null; return; }
+  if(Math.abs(G.sel.r-p.r)+Math.abs(G.sel.c-p.c)===1){ doSwap(G.sel,p); G.sel=null; G.drag=false; }
+  else { G.sel=p; tone(520,0.05,"sine",0.05); }
+}
+cv.addEventListener("pointerdown",e=>{
+  ac();
+  if(G.state==="ready"){ G.state="playing"; last=performance.now(); return; }
+  if(G.state!=="playing"&&G.state!=="paused") return;
+  const {x,y}=toCanvas(e);
+  if(G.state==="paused"){ if(inBtn(x,y)) openMenu(); return; }
+  G.drag=true; onDown(x,y);
+});
+cv.addEventListener("pointermove",e=>{
+  if(!G.drag||G.state!=="playing"||!G.sel||isBusy()) return;
+  const {x,y}=toCanvas(e);
+  const p=pick(x,y); if(!p) return;
+  if(p.r===G.sel.r&&p.c===G.sel.c) return;
+  if(Math.abs(G.sel.r-p.r)+Math.abs(G.sel.c-p.c)===1){ doSwap(G.sel,p); G.sel=null; G.drag=false; }
+});
+cv.addEventListener("pointerup",()=>{ G.drag=false; });
+cv.addEventListener("pointercancel",()=>{ G.drag=false; });
+
+function showMenu(){
+  card.innerHTML =
+    '<h2 class="pause">已 暂 停</h2>'+
+    '<p>剩余时间 '+Math.ceil(G.timeLeft)+'s　·　石块 '+stonesLeft()+' / '+G.stonesTotal+'<br>支撑柱还剩 '+supportBlocksLeft()+' 块　·　体力 '+Math.ceil(G.stamina)+'</p>'+
+    '<div class="btns">'+
+      '<button class="primary" onclick="resumeGame()">继续游戏</button>'+
+      '<button onclick="restartGame()">重新开始</button>'+
+      '<button onclick="quitToMenu()">退出（回到初始页）</button>'+
+      '<button class="ghost" onclick="toggleSound()">音效：'+(soundOn?"开":"关")+'</button>'+
+    '</div>';
+  overlay.classList.add("on");
+}
+function showEnd(){
+  const w=G.state==="clear";
+  card.innerHTML = w
+    ? '<h2 class="win">LEVEL CLEAR</h2><p>石块全漏光了，积石消失，国王获救！</p>'+
+      '<div class="stat">用时 <b>'+G.finalT.toFixed(1)+'s</b> ｜ 消除方块 <b>'+G.cleared+'</b> 块<br>剩余体力 <b>'+Math.ceil(G.stamina)+'</b> ｜ 得分 <b>'+G.score+'</b></div>'+
+      '<div class="btns"><button class="primary" onclick="restartGame()">再玩一次</button>'+
+      '<button onclick="quitToMenu()">退出（回到初始页）</button></div>'
+    : '<h2 class="lose">GAME OVER</h2><p>'+G.loseReason+'</p>'+
+      '<div class="stat">坚持 <b>'+G.finalT.toFixed(1)+'s</b> ｜ 石块还剩 <b>'+stonesLeft()+'</b> 颗<br>支撑柱还剩 <b>'+supportBlocksLeft()+'</b> 块 ｜ 得分 <b>'+G.score+'</b></div>'+
+      '<div class="btns"><button class="primary" onclick="restartGame()">再试一次</button>'+
+      '<button onclick="quitToMenu()">退出（回到初始页）</button></div>';
+  overlay.classList.add("on");
+}
+function openMenu(){ if(G.state!=="playing") return; G.state="paused"; G.sel=null; G.drag=false; tone(320,0.1,"sine",0.06); showMenu(); }
+function resumeGame(){ overlay.classList.remove("on"); if(G.state==="paused"){ G.state="playing"; last=performance.now(); } }
+function restartGame(){ overlay.classList.remove("on"); reset(); G.state="playing"; last=performance.now(); }
+function quitToMenu(){ overlay.classList.remove("on"); reset(); last=performance.now(); }
+function toggleSound(){ soundOn=!soundOn; const b=card.querySelector("button.ghost"); if(b) b.textContent="音效："+(soundOn?"开":"关"); }
+window.resumeGame=resumeGame; window.restartGame=restartGame;
+window.quitToMenu=quitToMenu; window.toggleSound=toggleSound;
+window.addEventListener("keydown",e=>{
+  if(e.key==="Escape"||e.key===" "){
+    if(G.state==="playing") openMenu();
+    else if(G.state==="paused") resumeGame();
+    e.preventDefault();
+  }
+  if(e.key==="r"||e.key==="R") restartGame();
+});
+
+reset();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
